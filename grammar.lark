@@ -1,0 +1,111 @@
+?start: chunk
+
+eval: "#eval" expr
+checkcall: "#checkcall" NAME func_body
+inline: "#inline" func_decl
+
+chunk: stmt* [last_stmt]
+
+?stmt: var_decl
+     | func_call -> call_stmt
+     | method_expr -> method_stmt
+     | if_stmt
+     | func_decl
+     | checkcall
+     | eval
+     | inline
+
+if_stmt: "if" expr "then" chunk elseif_branches [else_branch] "end"
+elseif_branches: elseif_branch*
+elseif_branch: "elseif" expr "then" chunk
+else_branch: "else" chunk
+
+?last_stmt: return_stmt
+          | break_stmt
+
+return_stmt: "return" [exprs]
+break_stmt: "break"
+
+func_decl: "function" NAME func_body
+func_expr: "function" func_body
+
+func_body: params chunk "end"
+params: "(" (NAME ("," NAME)*)? ")"
+
+var_decl: "local" names "=" exprs
+
+names: NAME ("," NAME)* ","?
+exprs: expr ("," expr)* ","?
+
+table: "{" (table_field ("," table_field)* ",")? "}"
+table_field: NAME "=" expr
+
+prop_expr: prefix_expr "." NAME
+method_expr: prefix_expr ":" NAME args
+
+func_call: prefix_expr args
+
+args: "(" (expr ("," expr)* ","?)? ")"
+    | STRING
+    | table
+
+?expr: or_expr
+     | func_expr
+     | eval
+
+?or_expr: or_expr OR_OP and_expr
+        | and_expr
+
+?and_expr: and_expr AND_OP eq_expr
+         | eq_expr
+
+?eq_expr: eq_expr EQ_OP rel_expr
+        | rel_expr
+
+?rel_expr: rel_expr REL_OP add_expr
+         | add_expr
+
+?add_expr: add_expr ADD_OP mul_expr
+         | mul_expr
+
+?mul_expr: mul_expr MUL_OP pow_expr
+         | pow_expr
+
+?pow_expr: pow_expr POW_OP unary_expr
+         | unary_expr
+
+?unary_expr: UNARY_OP unary_expr
+           | atom
+
+?atom: prefix_expr
+     | NIL
+     | BOOLEAN
+     | STRING
+     | NUMBER
+     | table
+
+?prefix_expr: NAME
+            | func_call
+            | method_expr
+            | prop_expr
+            | "(" expr ")" -> paren
+
+OR_OP: "or"
+AND_OP: "and"
+EQ_OP: "==" | "~="
+REL_OP: "<" | ">" | "<=" | ">="
+ADD_OP: "+" | "-" | ".."
+MUL_OP: "*" | "/" | "%"
+POW_OP: "^"
+UNARY_OP: "not" | "#" | "-"
+
+NIL: "nil"
+BOOLEAN: "true" | "false"
+STRING: /"([^"\\]|\\.)*"/
+NUMBER: /-?\d+(\.\d+)?/
+NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
+
+COMMENT: /--.*/
+
+%ignore /\s+/
+%ignore COMMENT
