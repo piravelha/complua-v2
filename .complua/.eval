@@ -32,9 +32,9 @@ end
 
 local file = io.open(".complua/.eval.temp", "w")
 
-local __eval = { (function(x, y)
+local __eval = { (function(x)
 assert(type(x) == "number");
 
-end)(1, 2) };
+end)(f(1)) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

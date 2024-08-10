@@ -14,11 +14,11 @@ def get_loc(tree) -> int:
 
 def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
 
-  if isinstance(t1, list):
-    return unify(t1[0], t2, **kw)
+  if isinstance(t1, TupleType):
+    return unify(t1.values[0], t2, **kw)
 
-  if isinstance(t2, list):
-    return unify(t1, t2[0], **kw)
+  if isinstance(t2, TupleType):
+    return unify(t1, t2.values[0], **kw)
 
   if isinstance(t1, UnknownType):
     return t2
@@ -60,16 +60,16 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       return f"???:{t1.loc}: Function types '{t1}' and '{t2}' have different parameter counts"
     
     new = []
-    for a, b in zip(t1.returns, t2.returns):
+    for a, b in zip(t1.returns.values, t2.returns.values):
       x = unify(a, b, **kw)
       if isinstance(x, str): return x
       new.append(x)
     
-    return FunctionType(new, t1.tree, None, t1.dependencies + t2.dependencies, False, t1.loc)
+    return FunctionType(TupleType(new), t1.tree, None, t1.dependencies + t2.dependencies, False, t1.loc)
   
   return f"???:{t1.loc}: Types don't unify: '{t1}' and '{t2}'"
 
-def filter_dependencies(type: Type) -> list[str]:
+def filter_dependencies(type: AnyType) -> list[str]:
   deps = type.dependencies
   new: list[str] = []
   for dep in deps:
@@ -81,10 +81,10 @@ def get_dependencies(tree: Tree, **kw) -> list[str]:
   from infer import infer
   from compiler import compile
   type = infer(tree, env=kw["type_env"], checkcall=kw["checkcall"])
-  if isinstance(type, list): type = type[0] if type else NilType()
   if isinstance(type, str): raise TypeError(type)
   dep_list: list[list[str]] = []
   for dep in filter_dependencies(type):
+    print(type)
     dep_tree = kw["env"][dep]
     dep_list.append(get_dependencies(dep_tree, **kw) + [compile(dep_tree, **kw)])
   flat_list = []

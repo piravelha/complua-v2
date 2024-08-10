@@ -3,7 +3,7 @@ from typing import TypeAlias
 from lark import Tree
 
 Type: TypeAlias = 'PrimitiveType | UnknownType | TableType | FunctionType'
-AnyType: TypeAlias = 'Type | list[Type]'
+AnyType: TypeAlias = 'Type | TupleType'
 
 @dataclass
 class PrimitiveType:
@@ -40,7 +40,7 @@ class TableType:
   
 @dataclass
 class FunctionType:
-  returns: list[Type]
+  returns: 'TupleType'
   tree: Tree
   checkcall: Tree | None
   dependencies: list[Tree]
@@ -54,8 +54,8 @@ class FunctionType:
       dependencies: list[Tree],
       inline: bool,
       loc: int):
-    if not isinstance(returns, list):
-      returns = [returns]
+    if not isinstance(returns, TupleType):
+      returns = TupleType([returns])
     self.returns = returns
     self.tree = tree
     self.checkcall = checkcall
@@ -65,6 +65,14 @@ class FunctionType:
   def __repr__(self):
     params, _ = self.tree.children
     params = ", ".join([f"{p}" for p in params.children])
-    returns = ", ".join(f"{r}" for r in self.returns)
+    returns = ", ".join(f"{r}" for r in self.returns.values)
     return f"({params}) -> {returns}"
   
+@dataclass
+class TupleType:
+  values: list[Type]
+  def __init__(self, values: list[Type], dependencies: list[Tree] = []):
+    self.values = values
+    self.dependencies = dependencies
+  def __repr__(self):
+    return "(" + ", ".join(f"{v}" for v in self.values) + ")"

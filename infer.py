@@ -31,8 +31,8 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
   for field in fields:
     key, value = field.children
     value = infer(value, **kw)
-    if isinstance(value, list):
-      value = value[0]
+    if isinstance(value, TupleType):
+      value = value.values[0]
     if isinstance(value, str): return value
     new_fields[key] = value
     deps += value.dependencies
@@ -40,8 +40,8 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
 
 def infer_prop_expr(prefix, prop, **kw) -> 'AnyType | str':
   prefix_type = infer(prefix, **kw)
-  if isinstance(prefix_type, list):
-    prefix_type = prefix_type[0]
+  if isinstance(prefix_type, TupleType):
+    prefix_type = prefix_type.values[0]
   if isinstance(prefix_type, str): return prefix_type
   if isinstance(prefix_type, UnknownType):
     return prefix_type
@@ -118,8 +118,8 @@ def infer_func_body(params, body, **kw) -> 'AnyType | str':
   for param in params.children:
     kw["env"][param.value] = UnknownType([], kw["loc"])
   body_type = infer(body, **kw)
-  assert isinstance(body_type, list)
-  deps = [d for ret in body_type for d in ret.dependencies] + [body]
+  assert isinstance(body_type, TupleType)
+  deps = [d for ret in body_type.values for d in ret.dependencies] + [body]
   new_deps = []
   for dep in deps:
     equals = False
@@ -140,14 +140,14 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
   new_args = []
   for arg in args.children:
     arg = infer(arg, **kw)
-    if isinstance(arg, list):
-      arg = arg[0]
+    if isinstance(arg, TupleType):
+      arg = arg.values[0]
     if isinstance(arg, str): return arg
     new_args.append(arg)
-  if isinstance(prefix_type, list):
-    prefix_type = prefix_type[0]
+  if isinstance(prefix_type, TupleType):
+    prefix_type = prefix_type.values[0]
   if isinstance(prefix_type, UnknownType):
-    prefix_type.dependencies += [d for arg in new_args for d in arg.dependencies]
+    prefix_type.dependencies += [d for arg in new_args for d in arg.dependencies] + [prefix] + args.children
     return prefix_type
   if not isinstance(prefix_type, FunctionType):
     return f"???:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"
@@ -163,10 +163,10 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
     kw["env"][param.value] = arg
   results = infer(body, **kw)
   if isinstance(results, str): return results
-  assert isinstance(results, list)
-  deps = [prefix] + args.children
-  deps += [d for arg in new_args for d in arg.dependencies] + prefix_type.dependencies
-  for result in results:
+  assert isinstance(results, TupleType)
+  deps = [d for arg in new_args for d in arg.dependencies] + prefix_type.dependencies
+  deps += [prefix] + args.children
+  for result in results.values:
     result.dependencies += deps
   return results
 
@@ -187,8 +187,8 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
   for expr in exprs.children:
     expr = infer(expr, **kw)
     if isinstance(expr, str): return expr
-    if isinstance(expr, list):
-      new_exprs.extend(expr)
+    if isinstance(expr, TupleType):
+      new_exprs.extend(expr.values)
     else:
       new_exprs.append(expr)
   if len(new_exprs) < len(names.children):
@@ -203,15 +203,15 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
 
 def infer_return_stmt(exprs, **kw) -> 'AnyType | str':
   if not exprs:
-    return []
-  new_exprs = []
+    return TupleType([])
+  new_exprs = TupleType([])
   for expr in exprs.children:
     expr = infer(expr, **kw)
     if isinstance(expr, str): return expr
-    if isinstance(expr, list):
-      new_exprs.extend(expr)
+    if isinstance(expr, TupleType):
+      new_exprs.values.extend(expr.values)
     else:
-      new_exprs.append(expr)
+      new_exprs.values.append(expr)
   return new_exprs
 
 def infer_eval(expr, **kw) -> 'AnyType | str':
@@ -235,22 +235,27 @@ def infer_inline(func_decl, **kw) -> 'AnyType | str':
 def infer_chunk(*stmts, **kw) -> 'AnyType | str':
   *stmts, last = stmts
   returns = []
+  depens = []
   for stmt in stmts:
     stmt = infer(stmt, **kw)
     if isinstance(stmt, str): return stmt
-    if isinstance(stmt, list):
-      for i, ret in enumerate(stmt):
+    if isinstance(stmt, TupleType):
+      for i, ret in enumerate(stmt.values):
         if i >= len(returns): returns.append(ret)
         else: returns[i] = unify(returns[i], ret)
         if isinstance(returns[i], str): return returns[i]
-  last = last and infer(last, **kw) or []
+        depens.extend(ret.dependencies)
+  last = last and infer(last, **kw) or TupleType([])
   if isinstance(last, str): return last
-  assert isinstance(last, list)
-  for i, ret in enumerate(last):
+  assert isinstance(last, TupleType)
+  for i, ret in enumerate(last.values):
     if i >= len(returns): returns.append(ret)
     else: returns[i] = unify(returns[i], ret)
     if isinstance(returns[i], str): return returns[i]
-  return returns
+    depens.extend(ret.dependencies)
+  rets = TupleType(returns)
+  rets.dependencies += depens
+  return rets
 
 def infer(tree, **kw) -> 'AnyType | str':
   kw["this"] = tree

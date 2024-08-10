@@ -2,7 +2,7 @@ import subprocess
 from lark import Token, Tree
 from parser import parser
 from type_models import *
-from util import get_loc, get_dependencies, replace_name
+from util import get_loc, get_dependencies, replace_name, filter_dependencies
 from infer import infer
 
 def compile_NAME(value, **kw) -> str:
@@ -99,13 +99,13 @@ def compile_return_stmt(exprs, **kw) -> str:
   return f"return {exprs};"
 
 def compile_eval(expr, **kw) -> str:
-  try:
-    deps = get_dependencies(expr, **kw)
-  except KeyError as e: # attempting to evaluate 
-    print(
-      f"???:{kw['loc']}: Could not evaluate '#eval' directive, " \
-      + f"variable '{e.args[0]}' is not statically known.")
-    exit(1)
+  #try:
+  deps = get_dependencies(expr, **kw)
+  #except KeyError as e: # attempting to evaluate
+  #  print(
+  #    f"???:{kw['loc']}: Could not evaluate '#eval' directive, " \
+  #    + f"variable '{e.args[0]}' is not statically known.")
+  #  exit(1)
   path = "./.complua/.eval"
   expr = compile(expr, **kw)
   code = f"local __eval = {{ {expr} }};\n"
@@ -146,16 +146,20 @@ def main() -> None:
   subprocess.run(["mkdir", ".complua"], capture_output=True)
 
   code = """
-  #checkcall add(x, y)
+  #checkcall add(x)
     assert(type(x) == "number")
   end
-  function add(x, y)
-    return x + y
+  function add(x)
+    return x + 1
   end
   local tbl = {
     add = add,
   }
-  print(tbl.add(1, 2))
+  local w = 5
+  local f = function(y)
+    return y + w
+  end
+  print(add(f(1)))
   """
 
   tree = parser.parse(code)
