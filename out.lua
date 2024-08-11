@@ -1,19 +1,15 @@
-function expect_type(value, str)
-if type(value) ~= str then
-error("Expected '" .. str .. "', but got " .. "'" .. type(value) .. "' instead");
-
-end
-
-end
-
 function Person(name, age)
-
-function greet(other)
-print("Hello, other");
-
+  return {
+    name = name,
+    age = age,
+    nested = {
+      name2 = name,
+      age2 = age
+    }
+  };
 end
-return {is_person = true, name = name, age = age, greet = greet};
-end
-local p1 = Person("Ian", 15);
-local p2 = Person("Miguel", 5);
-p1.greet(p2);
+
+local ian = Person("Ian", 15);
+
+print(ian.nested.name2, ian.nested.age2);
+

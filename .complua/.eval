@@ -32,18 +32,8 @@ end
 
 local file = io.open(".complua/.eval.temp", "w")
 
-function expect_type(value, str)
-if type(value) ~= str then
-error("Expected '" .. str .. "', but got " .. "'" .. type(value) .. "' instead");
 
-end
 
-end
-
-local __eval = { (function(name, age)
-expect_type(name, "string");
-expect_type(age, "number");
-
-end)("Miguel", 5) };
+local __eval = { 1 + 2 };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

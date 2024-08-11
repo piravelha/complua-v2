@@ -34,7 +34,7 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
     if isinstance(value, TupleType):
       value = value.values[0]
     if isinstance(value, str): return value
-    new_fields[key] = value
+    new_fields[key.value] = value
     deps += value.dependencies
   return TableType(new_fields, deps, False, kw["loc"])
 
@@ -289,7 +289,10 @@ def infer_inline(func_decl, **kw) -> 'AnyType | str':
     func.checkcall = kw["checkcall"][name.value]
   func.inline = True
   kw["env"][name.value] = func
-  return NilType(kw["loc"])
+  return NilType([], kw["loc"])
+
+def infer_using(*names, **kw):
+  return NilType()
 
 def infer_chunk(*stmts, **kw) -> 'AnyType | str':
   *stmts, last = stmts

@@ -1,12 +1,26 @@
-from os import replace
 import subprocess
 from lark import Token, Tree
 from parser import parser
 from type_models import *
-from util import get_loc, get_dependencies, replace_name, filter_dependencies
+from util import get_loc, get_dependencies, replace_name
 from infer import infer
 
+def get_using(path, current=None, **kw):
+  if current is None:
+    current = kw["type_env"]
+  first, *rest = path
+  type = current[first.value]
+  assert isinstance(type, TableType)
+  if not rest: return type
+  return get_using(rest, type.fields, **kw)
+
 def compile_NAME(value, **kw) -> str:
+  for using_path in kw["using"]:
+    using = get_using(using_path, **kw)
+    assert isinstance(using, TableType)
+    path_str = ".".join(using_path)
+    if value in using.fields:
+      return f"{path_str}.{value}"
   return value
 
 def compile_RAW_NAME(value, **kw) -> str:
@@ -160,6 +174,10 @@ def compile_inline(func_decl, **kw) -> str:
 def compile_checkcall(name, body, **kw) -> str:
   return ""
 
+def compile_using(*names, **kw):
+  kw["using"].append(names)
+  return ""
+
 def compile_chunk(*stmts, **kw) -> str:
   *stmts, last = stmts
   stmts = "\n".join(compile(s, **kw) for s in stmts)
@@ -183,10 +201,11 @@ def main() -> None:
   env = {}
   type_env = {}
   checkcall = {}
-  type = infer(tree, value_env=env, env=type_env, checkcall=checkcall)
+  using = []
+  type = infer(tree, value_env=env, env=type_env, checkcall=checkcall, using=using)
   if isinstance(type, str):
     raise TypeError(type)
-  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall)
+  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using)
   with open("out.lua", "w") as f:
     f.write(result)
 

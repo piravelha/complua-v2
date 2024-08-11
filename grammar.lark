@@ -3,6 +3,7 @@
 eval: "#eval" expr
 checkcall: "#checkcall" RAW_NAME func_body
 inline: "#inline" func_decl
+using: "#using" NAME ("." NAME)*
 
 chunk: stmt* [last_stmt]
 
@@ -15,6 +16,7 @@ chunk: stmt* [last_stmt]
      | checkcall
      | eval
      | inline
+     | using
 
 if_stmt: "if" expr "then" chunk elseif_branches [else_branch] "end"
 elseif_branches: elseif_branch*
@@ -24,7 +26,7 @@ else_branch: "else" chunk
 ?last_stmt: return_stmt
           | break_stmt
 
-return_stmt: "return" [exprs]
+return_stmt.2: "return" [exprs]
 break_stmt: "break"
 
 local_func_decl: "local" "function" RAW_NAME func_body
@@ -39,7 +41,7 @@ var_decl: "local" names "=" exprs
 names: RAW_NAME ("," RAW_NAME)* ","?
 exprs: expr ("," expr)* ","?
 
-table: "{" (table_field ("," table_field)* ",")? "}"
+table: "{" (table_field ("," table_field)* ","?)? "}"
 table_field: RAW_NAME "=" expr
 
 prop_expr: prefix_expr "." RAW_NAME
