@@ -1,7 +1,7 @@
 ?start: chunk
 
 eval: "#eval" expr
-checkcall: "#checkcall" NAME func_body
+checkcall: "#checkcall" RAW_NAME func_body
 inline: "#inline" func_decl
 
 chunk: stmt* [last_stmt]
@@ -11,6 +11,7 @@ chunk: stmt* [last_stmt]
      | method_expr -> method_stmt
      | if_stmt
      | func_decl
+     | local_func_decl
      | checkcall
      | eval
      | inline
@@ -26,22 +27,23 @@ else_branch: "else" chunk
 return_stmt: "return" [exprs]
 break_stmt: "break"
 
-func_decl: "function" NAME func_body
+local_func_decl: "local" "function" RAW_NAME func_body
+func_decl: "function" RAW_NAME func_body
 func_expr: "function" func_body
 
 func_body: params chunk "end"
-params: "(" (NAME ("," NAME)*)? ")"
+params: "(" (RAW_NAME ("," RAW_NAME)*)? ")"
 
 var_decl: "local" names "=" exprs
 
-names: NAME ("," NAME)* ","?
+names: RAW_NAME ("," RAW_NAME)* ","?
 exprs: expr ("," expr)* ","?
 
 table: "{" (table_field ("," table_field)* ",")? "}"
-table_field: NAME "=" expr
+table_field: RAW_NAME "=" expr
 
-prop_expr: prefix_expr "." NAME
-method_expr: prefix_expr ":" NAME args
+prop_expr: prefix_expr "." RAW_NAME
+method_expr: prefix_expr ":" RAW_NAME args
 
 func_call: prefix_expr args
 
@@ -104,6 +106,7 @@ BOOLEAN: "true" | "false"
 STRING: /"([^"\\]|\\.)*"/
 NUMBER: /-?\d+(\.\d+)?/
 NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
+RAW_NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 
 COMMENT: /--.*/
 

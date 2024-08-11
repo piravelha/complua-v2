@@ -1,4 +1,5 @@
 from lark import Tree, Token
+from lark.visitors import _Decoratable
 from type_models import *
 
 def get_loc(tree) -> int:
@@ -20,10 +21,14 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
   if isinstance(t2, TupleType):
     return unify(t1, t2.values[0], **kw)
 
-  if isinstance(t1, UnknownType):
+  if isinstance(t1, (UnknownType)):
+    t2 = t2.copy()
+    t2.dependencies += t1.dependencies
     return t2
   
-  if isinstance(t2, UnknownType):
+  if isinstance(t2, (UnknownType)):
+    t1 = t1.copy()
+    t1.dependencies += t2.dependencies
     return t1
   
   if isinstance(t1, PrimitiveType) and isinstance(t2, PrimitiveType):
@@ -50,7 +55,7 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       if isinstance(x, str): return x
       new[k2] = x
       
-    return TableType(new, t1.dependencies + t2.dependencies, t1.loc)
+    return TableType(new, t1.dependencies + t2.dependencies, t1.is_parameter, t1.loc)
   
   if isinstance(t1, FunctionType) and isinstance(t2, FunctionType):
 
@@ -65,7 +70,7 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       if isinstance(x, str): return x
       new.append(x)
     
-    return FunctionType(TupleType(new), t1.tree, None, t1.dependencies + t2.dependencies, False, t1.loc)
+    return FunctionType(TupleType(new), t1.tree, None, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc)
   
   return f"???:{t1.loc}: Types don't unify: '{t1}' and '{t2}'"
 
@@ -73,18 +78,21 @@ def filter_dependencies(type: AnyType) -> list[str]:
   deps = type.dependencies
   new: list[str] = []
   for dep in deps:
-    if isinstance(dep, Token) and dep.type == "NAME" and dep.value not in new:
-      new.append(dep.value)
+    if str(dep) not in new:
+      new.append(str(dep))
   return new
+
+typeof = type
 
 def get_dependencies(tree: Tree, **kw) -> list[str]:
   from infer import infer
   from compiler import compile
-  type = infer(tree, env=kw["type_env"], checkcall=kw["checkcall"])
+  type = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"])
   if isinstance(type, str): raise TypeError(type)
   dep_list: list[list[str]] = []
   for dep in filter_dependencies(type):
-    print(type)
+    if kw["env"].get(str(dep)) is None:
+      continue
     dep_tree = kw["env"][dep]
     dep_list.append(get_dependencies(dep_tree, **kw) + [compile(dep_tree, **kw)])
   flat_list = []
@@ -95,9 +103,18 @@ def get_dependencies(tree: Tree, **kw) -> list[str]:
       flat_list.append(dep)
   return flat_list
 
-def replace_name(tree: Tree | Token, old: str, new: Tree | Token) -> Tree | Token:
+def replace_name(tree, old: str | None, new: Tree | Token):
+  if not old: return tree
   if isinstance(tree, Token):
     if tree.type == "NAME" and tree.value == old:
       return new
     return tree
-  return Tree(tree.data, [replace_name(c, old, new) for c in tree.children])
+  if isinstance(tree, Tree):
+    children = []
+    for c in tree.children:
+      children.append(replace_name(c, old, new))
+      if isinstance(c, Tree) and c.data == "var_decl":
+        if old in [n.value for n in c.children[0].children]:
+          old = None
+    return Tree(tree.data, children)
+  return tree

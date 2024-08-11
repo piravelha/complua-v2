@@ -1,0 +1,35 @@
+
+function expect_type(value, str)
+  if type(value) ~= str then
+    error("Expected '" .. str .. "', but got "
+    .. "'" .. type(value) .. "' instead")
+  end
+end
+
+#checkcall Person(name, age)
+  expect_type(name, "string")
+  expect_type(age, "number")
+end
+function Person(name, age)
+  #checkcall greet(other)
+    if type(other) ~= "table"
+    or not other.is_person then
+      print(other)
+      error("You must only greet other people!")
+    end
+  end
+  function greet(other)
+    print("Hello, other")
+  end
+  return {
+    is_person = true,
+    name = name,
+    age = age,
+    greet = greet,
+  }
+end
+
+local p1 = Person("Ian", 15)
+local p2 = Person("Miguel", 5)
+p1.greet(p2)
+

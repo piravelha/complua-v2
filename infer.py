@@ -1,14 +1,14 @@
 from lark import Token
+from dataclasses import is_dataclass
 from type_models import *
-from parser import parser
 from util import get_loc, unify, filter_dependencies
 
 def infer_NAME(value, **kw) -> 'AnyType | str':
   if kw["env"].get(value):
     type = kw["env"][value]
-    type.dependencies = type.dependencies + [kw["this"]]
+    type.dependencies += [value]
     return type
-  return UnknownType([], kw["loc"])
+  return UnknownType([value], False, kw["loc"])
 
 def infer_NUMBER(value, **kw) -> 'AnyType | str':
   return NumberType([], kw["loc"])
@@ -36,7 +36,7 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
     if isinstance(value, str): return value
     new_fields[key] = value
     deps += value.dependencies
-  return TableType(new_fields, deps, kw["loc"])
+  return TableType(new_fields, deps, False, kw["loc"])
 
 def infer_prop_expr(prefix, prop, **kw) -> 'AnyType | str':
   prefix_type = infer(prefix, **kw)
@@ -58,18 +58,18 @@ def infer_unary_expr(op, expr, **kw) -> 'AnyType | str':
   if op == "not":
     t1 = unify(expr_type, BooleanType())
     if isinstance(t1, str): return t1
-    return BooleanType([expr] + t1.dependencies)
+    return BooleanType(t1.dependencies)
   if op == "-":
     t1 = unify(expr_type, NumberType())
     if isinstance(t1, str): return t1
-    return NumberType([expr] + t1.dependencies)
+    return NumberType(t1.dependencies)
   if op == "#":
     t1 = unify(expr_type, StringType())
     if isinstance(t1, str):
       if isinstance(expr_type, TableType):
-        return NumberType([expr] + expr_type.dependencies)
+        return NumberType(expr_type.dependencies)
       return t1
-    return NumberType([expr] + t1.dependencies)
+    return NumberType(t1.dependencies)
   assert False, f"Not implemented: {op}"
 
 def infer_math_expr(left, op, right, **kw) -> 'AnyType | str':
@@ -81,7 +81,7 @@ def infer_math_expr(left, op, right, **kw) -> 'AnyType | str':
   if isinstance(t1, str): return t1
   t2 = unify(right_type, NumberType())
   if isinstance(t2, str): return t2
-  return NumberType(t1.dependencies + t2.dependencies + [left] + [right])
+  return NumberType(t1.dependencies + t2.dependencies)
 
 infer_pow_expr = infer_math_expr
 infer_mul_expr = infer_math_expr
@@ -96,13 +96,13 @@ def infer_add_expr(left, op, right, **kw) -> 'AnyType | str':
     if isinstance(t1, str): return t1
     t2 = unify(right_type, StringType())
     if isinstance(t2, str): return t2
-    return StringType(t1.dependencies + t2.dependencies + [left] + [right])
+    return StringType(t1.dependencies + t2.dependencies)
   else:
     t1 = unify(left_type, NumberType())
     if isinstance(t1, str): return t1
     t2 = unify(right_type, NumberType())
     if isinstance(t2, str): return t2
-    return NumberType(t1.dependencies + t2.dependencies + [left] + [right])
+    return NumberType(t1.dependencies + t2.dependencies)
 
 def infer_eq_expr(left, op, right, **kw) -> 'AnyType | str':
   left_type = infer(left, **kw)
@@ -111,43 +111,58 @@ def infer_eq_expr(left, op, right, **kw) -> 'AnyType | str':
   if isinstance(right_type, str): return right_type
   t1 = unify(left_type, right_type)
   if isinstance(t1, str): return t1
-  return BooleanType(t1.dependencies + [left] + [right])
+  return BooleanType(t1.dependencies)
+
+def infer_log_expr(left, op, right, **kw) -> 'AnyType | str':
+  left_type = infer(left, **kw)
+  if isinstance(left_type, str): return left_type
+  right_type = infer(right, **kw)
+  if isinstance(right_type, str): return right_type
+  t1 = unify(left_type, BooleanType())
+  if isinstance(t1, str): return t1
+  t2 = unify(right_type, BooleanType())
+  if isinstance(t2, str): return t2
+  return BooleanType(t1.dependencies + t2.dependencies)
+
+infer_and_expr = infer_log_expr
+infer_or_expr = infer_log_expr
+
+
 
 def infer_func_body(params, body, **kw) -> 'AnyType | str':
   kw["env"] = kw["env"].copy()
   for param in params.children:
-    kw["env"][param.value] = UnknownType([], kw["loc"])
+    kw["env"][param.value] = UnknownType([], True, kw["loc"])
   body_type = infer(body, **kw)
-  assert isinstance(body_type, TupleType)
-  deps = [d for ret in body_type.values for d in ret.dependencies] + [body]
-  new_deps = []
-  for dep in deps:
-    equals = False
-    for param in params.children:
-      if dep == param:
-        equals = True
-        break
-    if not equals: new_deps.append(dep)
   if isinstance(body_type, str): return body_type
-  return FunctionType(body_type, kw["this"], None, new_deps, False, kw["loc"])
+  assert isinstance(body_type, TupleType)
+  return FunctionType(body_type, kw["this"], None, body_type.dependencies, False, False, kw["loc"])
 
 def infer_func_expr(func, **kw) -> 'AnyType | str':
   return infer(func, **kw)
 
 def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
   prefix_type = infer(prefix, **kw)
-  if isinstance(prefix_type, str): return prefix_type
+  if isinstance(prefix_type, str):
+    return prefix_type
+  prefix_depens = prefix_type.dependencies.copy()
   new_args = []
+  arg_depens = []
   for arg in args.children:
     arg = infer(arg, **kw)
+    if isinstance(arg, str):
+      return arg
     if isinstance(arg, TupleType):
-      arg = arg.values[0]
-    if isinstance(arg, str): return arg
-    new_args.append(arg)
+      new_args.extend(arg.values)
+      arg_depens.extend(arg.dependencies)
+    else:
+      new_args.append(arg)
+      arg_depens.extend(arg.dependencies)
   if isinstance(prefix_type, TupleType):
-    prefix_type = prefix_type.values[0]
+    prefix_type = prefix_type.values[0] if prefix_type.values else NilType()
   if isinstance(prefix_type, UnknownType):
-    prefix_type.dependencies += [d for arg in new_args for d in arg.dependencies] + [prefix] + args.children
+    prefix_depens += arg_depens
+    prefix_type.dependencies += prefix_depens
     return prefix_type
   if not isinstance(prefix_type, FunctionType):
     return f"???:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"
@@ -158,29 +173,36 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
   if len(new_args) > len(params.children):
     return f"???:{kw['loc']}: Too many arguments provided to function '{prefix_type}', " \
       + f"expected {len(params.children)}, but got {len(new_args)}"
+  kw["env"] = kw["env"].copy()
   for param, arg in zip(params.children, new_args):
     assert isinstance(param, Token)
+    arg = arg.copy()
+    arg.is_parameter = True
     kw["env"][param.value] = arg
   results = infer(body, **kw)
-  if isinstance(results, str): return results
+  if isinstance(results, str):
+    return results
   assert isinstance(results, TupleType)
-  deps = [d for arg in new_args for d in arg.dependencies] + prefix_type.dependencies
-  deps += [prefix] + args.children
-  for result in results.values:
-    result.dependencies += deps
+  deps = prefix_depens + arg_depens
+  results.dependencies += deps
   return results
 
 def infer_call_stmt(call, **kw) -> 'AnyType | str':
   return infer(call, **kw)
 
 def infer_func_decl(name, func, **kw) -> 'AnyType | str':
+  kw["env"][name.value] = UnknownType([], False, kw["loc"])
   func = infer(func, **kw)
   if isinstance(func, str): return func
   assert isinstance(func, FunctionType)
+  func = func.copy()
   if kw["checkcall"].get(name.value):
     func.checkcall = kw["checkcall"][name.value]
+  func.dependencies += [name]
   kw["env"][name.value] = func
-  return NilType(kw["loc"])
+  return NilType([], kw["loc"])
+
+infer_local_func_decl = infer_func_decl
 
 def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
   new_exprs: list[Type] = []
@@ -188,7 +210,9 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
     expr = infer(expr, **kw)
     if isinstance(expr, str): return expr
     if isinstance(expr, TupleType):
-      new_exprs.extend(expr.values)
+      for val in expr.values:
+        val.dependencies = expr.dependencies
+        new_exprs.append(val)
     else:
       new_exprs.append(expr)
   if len(new_exprs) < len(names.children):
@@ -200,6 +224,41 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
   for name, expr in zip(names.children, new_exprs):
     kw["env"][name.value] = expr
   return NilType([], kw["loc"])
+
+def infer_if_stmt(cond, body, elif_bs, else_b, **kw):
+  cond = infer(cond, **kw)
+  if isinstance(cond, str): return cond
+  if isinstance(cond, TupleType): cond = cond.values[0] if cond.values else NilType()
+  c = unify(cond, BooleanType())
+  if isinstance(c, str): return c
+  body = infer(body, **kw)
+  assert isinstance(body, TupleType)
+  for elif_b in elif_bs.children:
+    elif_cond, elif_body = elif_b.children
+    elif_cond = infer(elif_cond, **kw)
+    if isinstance(elif_cond, str): return cond
+    if isinstance(elif_cond, TupleType): elif_cond = elif_cond.values[0] if elif_cond.values else NilType()
+    c = unify(cond, BooleanType())
+    if isinstance(c, str): return c
+    elif_body = infer(elif_body, **kw)
+    assert isinstance(elif_body, TupleType)
+    new = []
+    for a, b in zip(body.values, elif_body.values):
+      x = unify(a, b)
+      if isinstance(x, str): return x
+      new.append(x)
+    body = TupleType(new, body.dependencies + elif_body.dependencies)
+  if else_b:
+    else_body = else_b.children[0]
+    else_body = infer(else_body, **kw)
+    assert isinstance(else_body, TupleType)
+    new = []
+    for a, b in zip(body.values, else_body.values):
+      x = unify(a, b)
+      if isinstance(x, str): return x
+      new.append(x)
+    body = TupleType(new, body.dependencies + else_body.dependencies)
+  return body
 
 def infer_return_stmt(exprs, **kw) -> 'AnyType | str':
   if not exprs:
@@ -219,7 +278,7 @@ def infer_eval(expr, **kw) -> 'AnyType | str':
 
 def infer_checkcall(name, func, **kw) -> 'AnyType | str':
   kw["checkcall"][name.value] = func
-  return NilType(kw["loc"])
+  return NilType([], kw["loc"])
 
 def infer_inline(func_decl, **kw) -> 'AnyType | str':
   name, func = func_decl.children
@@ -238,13 +297,15 @@ def infer_chunk(*stmts, **kw) -> 'AnyType | str':
   depens = []
   for stmt in stmts:
     stmt = infer(stmt, **kw)
-    if isinstance(stmt, str): return stmt
+    if isinstance(stmt, str):
+      return stmt
     if isinstance(stmt, TupleType):
       for i, ret in enumerate(stmt.values):
         if i >= len(returns): returns.append(ret)
         else: returns[i] = unify(returns[i], ret)
         if isinstance(returns[i], str): return returns[i]
-        depens.extend(ret.dependencies)
+    depens.extend(stmt.dependencies)
+
   last = last and infer(last, **kw) or TupleType([])
   if isinstance(last, str): return last
   assert isinstance(last, TupleType)
@@ -252,9 +313,18 @@ def infer_chunk(*stmts, **kw) -> 'AnyType | str':
     if i >= len(returns): returns.append(ret)
     else: returns[i] = unify(returns[i], ret)
     if isinstance(returns[i], str): return returns[i]
-    depens.extend(ret.dependencies)
+  depens.extend(last.dependencies)
   rets = TupleType(returns)
-  rets.dependencies += depens
+  new_depens = []
+  for dep in depens:
+    found = False
+    if v := kw["env"].get(str(dep)):
+      if v.is_parameter:
+        found = True
+        break
+    if not found:
+      new_depens.append(dep)
+  rets.dependencies = new_depens
   return rets
 
 def infer(tree, **kw) -> 'AnyType | str':
