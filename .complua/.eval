@@ -35,8 +35,8 @@ local file = io.open(".complua/.eval.temp", "w")
 
 
 local __eval = { (function(y)
-assert(y % 2 == 0);
+assert(y + - 1 == 0);
 
-end)(3) };
+end)(1) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

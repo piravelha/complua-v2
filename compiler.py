@@ -3,7 +3,7 @@ from lark import Token, Tree
 from parser import parser
 from type_models import *
 from util import get_loc, get_dependencies, replace_name
-from infer import infer
+from infer import *
 from formatter import format
 
 def get_using(path, name, current=None, acc="", **kw):
@@ -18,6 +18,15 @@ def get_using(path, name, current=None, acc="", **kw):
       return f"{acc}{first}.{name}"
     return name
   return get_using(rest, name, type.fields, first + "." + acc, **kw)
+
+def infer_from_compile(tree, **kw):
+  if isinstance(tree, Token) and not globals().get("infer_"+tree.type):
+    return tree
+  if isinstance(tree, Tree) and not globals().get("infer_"+tree.data):
+    return tree
+  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"])
+  if isinstance(result, str): raise TypeError(result)
+  return result
 
 def compile_NAME(value, **kw) -> str:
   for using_path in kw["using"]:
@@ -124,15 +133,6 @@ def compile_func_call(prefix, args, **kw) -> str:
         assert isinstance(p, Token)
         body = replace_name(body, p.value, a)
       return f"(function()\n" + compile(body, **kw) + "\nend)()"
-    if prefix_type.checkcall:
-      body = prefix_type.checkcall
-      compile_eval(
-        Tree("func_call", [
-          Tree("paren", [
-            Tree("func_expr", [body])
-          ]),
-          args,
-        ]), **kw)
   args = ", ".join(compile(a, **kw) for a in args.children)
   return f"{prefix}({args})"
 
@@ -246,10 +246,13 @@ def compile_eval(expr, **kw) -> str:
   return f"unpack({generated})"
 
 def compile_inline(func_decl, **kw) -> str:
-  return compile(func_decl, **kw)
+  return ""
 
 def compile_checkcall(name, body, **kw) -> str:
   return ""
+
+def compile_return_checkcall(check, func, **kw):
+  return compile(func, **kw)
 
 def compile_using(*names, **kw):
   kw["using"].append(names)
@@ -279,9 +282,8 @@ def main() -> None:
   type_env = {}
   checkcall = {}
   using = []
-  type = infer(tree, value_env=env, env=type_env, checkcall=checkcall, using=using)
-  if isinstance(type, str):
-    raise TypeError(type)
+  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using)
+  if isinstance(type, str): raise TypeError(type)
   result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={})
   with open("out.lua", "w") as f:
     f.write(format(result))

@@ -1,7 +1,5 @@
-function add(x)
-  function inner(y)
-    return x + y;
-  end
-  return inner;
-end
-unpack({})
+(function()
+return function(y)
+return y;
+end;
+end)()(1);

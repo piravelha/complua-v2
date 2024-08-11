@@ -1,8 +1,9 @@
+from subprocess import check_call
 from typing import Dict, Tuple
 from lark import Token
 from dataclasses import is_dataclass
 from type_models import *
-from util import get_loc, unify, filter_dependencies
+from util import get_loc, replace_name, unify, filter_dependencies
 import re
 
 def get_path(path, **kw):
@@ -262,8 +263,13 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
     prefix_type.dependencies += prefix_depens
     return prefix_type
   if not isinstance(prefix_type, FunctionType):
-    return f"???:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"
+    return f"???:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"  
   params, body = prefix_type.tree.children
+  if prefix_type.inline:
+    for p, a in zip(params.children, args.children):
+      assert isinstance(p, Token)
+      body = replace_name(body, p.value, a)
+    return infer(body, **kw)
   if len(new_args) < len(params.children):
     return f"???:{kw['loc']}: Not enough arguments provided to function '{prefix_type}', " \
       + f"expected {len(params.children)}, but got {len(new_args)}"
@@ -271,6 +277,16 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
     return f"???:{kw['loc']}: Too many arguments provided to function '{prefix_type}', " \
       + f"expected {len(params.children)}, but got {len(new_args)}"
   kw["env"] = kw["env"].copy()
+  if prefix_type.checkcall:
+    from compiler import compile_eval
+    body = prefix_type.checkcall
+    compile_eval(
+      Tree("func_call", [
+        Tree("paren", [
+          Tree("func_expr", [body])
+        ]),
+        args,
+      ]), env=kw["value_env"], type_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"])
   for param, arg in zip(params.children, new_args):
     assert isinstance(param, Token)
     arg = arg.copy()
@@ -279,7 +295,10 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
   results = infer(body, **kw)
   if isinstance(results, str):
     return results
-  assert isinstance(results, TupleType)
+  if not isinstance(results, TupleType):
+    t = TupleType([results])
+    t.dependencies = results.dependencies
+    results = t
   deps = prefix_depens + arg_depens
   results.dependencies += deps
   return results
@@ -473,14 +492,18 @@ def infer_checkcall(name, func, **kw) -> 'AnyType | str':
 
 def infer_inline(func_decl, **kw) -> 'AnyType | str':
   name, func = func_decl.children
-  func = infer(func, **kw)
-  if isinstance(func, str): return func
-  assert isinstance(func, FunctionType)
-  if kw["checkcall"].get(name.value):
-    func.checkcall = kw["checkcall"][name.value]
-  func.inline = True
-  kw["env"][name.value] = func
-  return NilType([], kw["loc"])
+  kw["env"][name.value] = FunctionType(TupleType([]), func, None, [], True, False, kw["loc"])
+  return NilType()
+
+def infer_return_checkcall(check, ret, **kw):
+  ret = infer(ret, **kw)
+  if isinstance(ret, str): return ret
+  assert isinstance(ret, TupleType)
+  func = ret.values[0]
+  if not isinstance(func, FunctionType):
+    return f"???:{kw['loc']}: Anonnymous '#checkcall' directive must be followed by a function, but got '{func}' instead"
+  func.checkcall = check
+  return TupleType([func] + ret.values[1:])
 
 def infer_using(*names, **kw):
   return NilType()
@@ -526,4 +549,6 @@ def infer(tree, **kw) -> 'AnyType | str':
   kw["loc"] = get_loc(tree)
   if isinstance(tree, Token):
     return globals()["infer_" + tree.type](tree.value, **kw)
-  return globals()["infer_" + tree.data](*tree.children, **kw)
+  if isinstance(tree, Tree):
+    return globals()["infer_" + tree.data](*tree.children, **kw)
+  return UnknownType([], False, 0)

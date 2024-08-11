@@ -2,6 +2,7 @@
 
 eval: "#eval" expr
 checkcall: "#checkcall" RAW_NAME func_body
+return_checkcall: "#checkcall" func_body return_stmt
 inline: "#inline" func_decl
 using: "#using" NAME ("." NAME)*
 
@@ -43,6 +44,7 @@ else_branch: "else" chunk
 
 ?last_stmt: return_stmt
           | break_stmt
+          | return_checkcall
 
 return_stmt.2: "return" [exprs]
 break_stmt: "break"
