@@ -4,23 +4,25 @@ from parser import parser
 from type_models import *
 from util import get_loc, get_dependencies, replace_name
 from infer import infer
+from formatter import format
 
-def get_using(path, current=None, **kw):
+def get_using(path, name, current=None, acc="", **kw):
   if current is None:
     current = kw["type_env"]
+  if name in kw["env"]:
+    return name
   first, *rest = path
   type = current[first.value]
-  assert isinstance(type, TableType)
-  if not rest: return type
-  return get_using(rest, type.fields, **kw)
+  if not rest:
+    if name in type.fields:
+      return f"{acc}{first}.{name}"
+    return name
+  return get_using(rest, name, type.fields, first + "." + acc, **kw)
 
 def compile_NAME(value, **kw) -> str:
   for using_path in kw["using"]:
-    using = get_using(using_path, **kw)
-    assert isinstance(using, TableType)
-    path_str = ".".join(using_path)
-    if value in using.fields:
-      return f"{path_str}.{value}"
+    name = get_using(using_path, value, **kw)
+    if name != value: return name
   return value
 
 def compile_RAW_NAME(value, **kw) -> str:
@@ -42,12 +44,11 @@ def compile_paren(expr, **kw) -> str:
   return "(" + compile(expr, **kw) + ")"
 
 def compile_table(*fields, **kw) -> str:
-  code = "{"
-  for i, field in enumerate(fields):
+  code = "{\n"
+  for field in fields:
     key, value = field.children
-    if i > 0: code += ", "
     value = compile(value, **kw)
-    code += f"{key} = {value}"
+    code += f"{key} = {value},\n"
   return code + "}"
 
 def compile_prop_expr(prefix, prop, **kw) -> str:
@@ -105,6 +106,7 @@ def compile_call_stmt(call, **kw) -> str:
 
 def compile_func_decl(name, func, **kw) -> str:
   kw["env"][name.value] = kw["this"]
+  kw["value_env"][name.value] = func
   func = compile(func, **kw)
   return f"function {name}{func}"
 
@@ -116,6 +118,8 @@ def compile_local_func_decl(name, func, **kw) -> str:
 def compile_var_decl(names, exprs, **kw) -> str:
   for name, expr in zip(names.children, exprs.children):
     kw["env"][name.value] = Tree("var_decl", [Tree("names", [name]), Tree("exprs", [expr])])
+    kw["value_env"][name.value] = expr
+
   names = ", ".join(compile(n, **kw) for n in names.children)
   exprs = ", ".join(compile(e, **kw) for e in exprs.children)
   return f"local {names} = {exprs};"
@@ -205,9 +209,9 @@ def main() -> None:
   type = infer(tree, value_env=env, env=type_env, checkcall=checkcall, using=using)
   if isinstance(type, str):
     raise TypeError(type)
-  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using)
+  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={})
   with open("out.lua", "w") as f:
-    f.write(result)
+    f.write(format(result))
 
 if __name__ == "__main__":
   main()
