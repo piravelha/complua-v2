@@ -1,22 +1,8 @@
 
-function Person(name, age)
-  return {
-    nested = {
-      name = name,
-      age = age,
-    }
-  }
+function add(x)
+  return function(y)
+    return x + y
+  end
 end
 
-local ian = Person("Ian", 15)
-#using ian.nested
-
-print(name, age)
---> Ian       15
-
-local name = "Miguel" -- Shadowing
-
-print(name, age)
---> Miguel    15
-
-
+#eval print(add(1)(2))

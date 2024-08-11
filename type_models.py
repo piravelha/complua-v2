@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 from typing import TypeAlias
 from lark import Tree
-from lark.utils import Serialize
 
-Type: TypeAlias = 'PrimitiveType | UnknownType | TableType | FunctionType'
+Type: TypeAlias = 'PrimitiveType | UnknownType | TableType | DictType | FunctionType'
 AnyType: TypeAlias = 'Type | TupleType'
 
 @dataclass
@@ -48,6 +47,18 @@ class TableType:
   def copy(self):
     return TableType(self.fields, self.dependencies, self.is_parameter, self.loc)
   
+@dataclass
+class DictType:
+  key: Type
+  value: Type
+  dependencies: list[Tree]
+  is_parameter: bool
+  loc: int
+  def __repr__(self):
+    return f"{{ [{self.key}]: {self.value} }}"
+  def copy(self):
+    return DictType(self.key, self.value, self.dependencies, self.is_parameter, self.loc)
+
 @dataclass
 class FunctionType:
   returns: 'TupleType'

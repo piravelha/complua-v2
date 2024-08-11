@@ -57,6 +57,14 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       
     return TableType(new, t1.dependencies + t2.dependencies, t1.is_parameter, t1.loc)
   
+  if isinstance(t1, DictType) and isinstance(t2, DictType):
+
+    k = unify(t1.key, t2.key)
+    if isinstance(k, str): return k
+    v = unify(t1.value, t2.value)
+    if isinstance(v, str): return v
+    return DictType(k, v, t1.dependencies, t1.is_parameter, t1.loc)
+
   if isinstance(t1, FunctionType) and isinstance(t2, FunctionType):
 
     ps1, _ = t1.tree.children

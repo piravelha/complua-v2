@@ -11,12 +11,30 @@ chunk: stmt* [last_stmt]
      | func_call -> call_stmt
      | method_expr -> method_stmt
      | if_stmt
+     | range_for_stmt
+     | iter_for_stmt
+     | it_for_stmt
+     | of_for_stmt
      | func_decl
      | local_func_decl
+     | assign_stmt
      | checkcall
      | eval
      | inline
      | using
+
+assign_stmt: assignable "=" expr
+?assignable: NAME
+           | prop_expr
+           | index_expr
+
+it_for_stmt: "for" expr "do" chunk "end"
+
+iter_for_stmt: "for" names "in" expr "do" chunk "end"
+
+of_for_stmt: "for" NAME "of" expr "do" chunk "end"
+
+range_for_stmt: "for" NAME "=" expr ["," expr ["," expr]] "do" chunk "end"
 
 if_stmt: "if" expr "then" chunk elseif_branches [else_branch] "end"
 elseif_branches: elseif_branch*
@@ -41,16 +59,21 @@ var_decl: "local" names "=" exprs
 names: RAW_NAME ("," RAW_NAME)* ","?
 exprs: expr ("," expr)* ","?
 
+dict: "{" (dict_field ("," dict_field)* ","?)? "}"
+dict_field: "[" expr "]" "=" expr | expr
+
 table: "{" (table_field ("," table_field)* ","?)? "}"
 table_field: RAW_NAME "=" expr
 
 prop_expr: prefix_expr "." RAW_NAME
+index_expr: prefix_expr "[" expr "]"
 method_expr: prefix_expr ":" RAW_NAME args
 
 func_call: prefix_expr args
 
 args: "(" (expr ("," expr)* ","?)? ")"
     | STRING
+    | template_literal
     | table
 
 ?expr: or_expr
@@ -85,14 +108,23 @@ args: "(" (expr ("," expr)* ","?)? ")"
      | NIL
      | BOOLEAN
      | STRING
+     | template_literal
      | NUMBER
      | table
+     | dict
 
 ?prefix_expr: NAME
             | func_call
             | method_expr
             | prop_expr
+            | index_expr
             | "(" expr ")" -> paren
+
+template_literal: "`" [TEMPLATE] template_content* "`"
+
+template_content: "{" expr "}" [TEMPLATE]
+
+TEMPLATE: /[^`{]+/
 
 OR_OP: "or"
 AND_OP: "and"

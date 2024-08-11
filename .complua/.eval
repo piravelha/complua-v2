@@ -32,8 +32,14 @@ end
 
 local file = io.open(".complua/.eval.temp", "w")
 
+function add(x)
 
+return function(y)
 
-local __eval = { 1 + 2 };
+return x + y;
+end;
+end
+
+local __eval = { print(add(1)(2)) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

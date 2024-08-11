@@ -1,7 +1,34 @@
+from typing import Dict, Tuple
 from lark import Token
 from dataclasses import is_dataclass
 from type_models import *
 from util import get_loc, unify, filter_dependencies
+import re
+
+def get_path(path, **kw):
+  def run(path, env):
+    if isinstance(path, Token):
+      return env[path], env
+    if path.data == "prop_expr":
+      prefix, prop = path.children
+      prefix, _ = run(prefix, env)
+      if isinstance(prefix, str): return prefix, _
+      assert isinstance(prefix, TableType)
+      return run(prop, prefix.fields)[0], prefix
+    if path.data == "index_expr":
+      prefix, _ = path.children
+      prefix, _ = run(prefix, env)
+      if isinstance(prefix, str): return prefix, _
+      assert isinstance(prefix, DictType)
+      return prefix.value, prefix
+    assert False
+  def get_right(path):
+    if isinstance(path, Token):
+      return path
+    return get_right(path.children[1])
+  value, parent = run(path, kw["env"])
+  if isinstance(value, str): return value
+  return get_right(path), parent
 
 def infer_NAME(value, **kw) -> 'AnyType | str':
   if kw["env"].get(value):
@@ -15,6 +42,14 @@ def infer_NUMBER(value, **kw) -> 'AnyType | str':
 
 def infer_STRING(value, **kw) -> 'AnyType | str':
   return StringType([], kw["loc"])
+
+def infer_template_literal(_, *contents, **kw):
+  for content in contents:
+    x, _ = content.children
+    x = infer(x, **kw)
+    if isinstance(x, str):
+      return x
+  return StringType()
 
 def infer_BOOLEAN(value, **kw) -> 'AnyType | str':
   return BooleanType([], kw["loc"])
@@ -38,6 +73,37 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
     deps += value.dependencies
   return TableType(new_fields, deps, False, kw["loc"])
 
+def infer_dict(*fields, **kw):
+  key_type = None
+  value_type = None
+  for field in fields:
+    if len(field.children) == 2:
+      key, value = field.children
+      key = infer(key, **kw)
+    else:
+      value = field.children[0]
+      key = NumberType()
+    if isinstance(key, str): return key
+    value = infer(value, **kw)
+    if isinstance(value, str): return value 
+    if isinstance(key, TupleType):
+      key = key.values[0]
+    if isinstance(value, TupleType):
+      value = value.values[0]
+    if not key_type:
+      key_type = key
+    if not value_type:
+      value_type = value
+    k = unify(key_type, key)
+    if isinstance(k, str): return k
+    key_type = k
+    v = unify(value_type, value)
+    if isinstance(v, str): return v
+    value_type = v
+  assert key_type
+  assert value_type
+  return DictType(key_type, value_type, key_type.dependencies + value_type.dependencies, False, kw["loc"])
+
 def infer_prop_expr(prefix, prop, **kw) -> 'AnyType | str':
   prefix_type = infer(prefix, **kw)
   if isinstance(prefix_type, TupleType):
@@ -51,6 +117,25 @@ def infer_prop_expr(prefix, prop, **kw) -> 'AnyType | str':
     if key == prop.value:
       return value
   return f"???:{kw['loc']}: Property '{prop}' does not exist on table '{prefix_type}'"
+
+def infer_index_expr(prefix, index, **kw):
+  prefix_type = infer(prefix, **kw)
+  if isinstance(prefix_type, str): return prefix_type
+  if isinstance(prefix_type, TupleType):
+    prefix_type = prefix_type.values[0]
+  index_type = infer(index, **kw)
+  if isinstance(index_type, str): return index_type
+  if isinstance(index_type, TupleType):
+    index_type = index_type.values[0]
+  if isinstance(prefix_type, UnknownType):
+    prefix_type.dependencies += index_type.dependencies
+    return prefix_type
+  if not isinstance(prefix_type, DictType):
+    return f"???:{kw['loc']}: Attempting to index a non-dictionary type: '{prefix_type}'"
+  u = unify(prefix_type.key, index_type)
+  if isinstance(u, str): return u
+  return prefix_type.value
+
 
 def infer_unary_expr(op, expr, **kw) -> 'AnyType | str':
   expr_type = infer(expr, **kw)
@@ -66,7 +151,7 @@ def infer_unary_expr(op, expr, **kw) -> 'AnyType | str':
   if op == "#":
     t1 = unify(expr_type, StringType())
     if isinstance(t1, str):
-      if isinstance(expr_type, TableType):
+      if isinstance(expr_type, (TableType, DictType)):
         return NumberType(expr_type.dependencies)
       return t1
     return NumberType(t1.dependencies)
@@ -103,6 +188,18 @@ def infer_add_expr(left, op, right, **kw) -> 'AnyType | str':
     t2 = unify(right_type, NumberType())
     if isinstance(t2, str): return t2
     return NumberType(t1.dependencies + t2.dependencies)
+
+def infer_rel_expr(left, op, right, **kw) -> 'AnyType | str':
+  left_type = infer(left, **kw)
+  if isinstance(left_type, str): return left_type
+  right_type = infer(right, **kw)
+  if isinstance(right_type, str): return right_type
+  t1 = unify(left_type, NumberType())
+  if isinstance(t1, str): return t1
+  t2 = unify(right_type, NumberType())
+  if isinstance(t2, str): return t2
+  return BooleanType(t1.dependencies + t2.dependencies)
+
 
 def infer_eq_expr(left, op, right, **kw) -> 'AnyType | str':
   left_type = infer(left, **kw)
@@ -225,6 +322,32 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
     kw["env"][name.value] = expr
   return NilType([], kw["loc"])
 
+def infer_assign_stmt(prefix, expr, **kw):
+  expr = infer(expr, **kw)
+  if isinstance(expr, str): return expr
+  if isinstance(expr, TupleType):
+    expr = expr.values[0]
+  result = get_path(prefix, **kw)
+  if isinstance(result, str): return result
+  last, parent = result
+  if isinstance(parent, DictType):
+    u = unify(expr, parent.key)
+    if isinstance(u, str): return u
+    return NilType()
+  if isinstance(parent, TableType):
+    if last.value not in parent.fields:
+      parent.fields[last.value] = expr
+      return NilType()
+    u = unify(expr, parent.fields[last.value])
+    if isinstance(u, str): return u
+  if isinstance(parent, dict):
+    if not parent.get(last.value):
+      parent[last.value] = expr
+      return NilType()
+    u = unify(expr, parent[last.value])
+    if isinstance(u, str): return u
+  return NilType()
+
 def infer_if_stmt(cond, body, elif_bs, else_b, **kw):
   cond = infer(cond, **kw)
   if isinstance(cond, str): return cond
@@ -259,6 +382,74 @@ def infer_if_stmt(cond, body, elif_bs, else_b, **kw):
       new.append(x)
     body = TupleType(new, body.dependencies + else_body.dependencies)
   return body
+
+def infer_range_for_stmt(var, e1, e2, e3, body, **kw):
+  e1 = infer(e1, **kw)
+  if isinstance(e1, str): return e1
+  t1 = unify(e1, NumberType())
+  if isinstance(t1, str): return t1
+  if e2:
+    e2 = infer(e2, **kw)
+    if isinstance(e2, str): return e2
+    t2 = unify(e2, NumberType())
+    if isinstance(t2, str): return t2
+    if e3:
+      e3 = infer(e3, **kw)
+      if isinstance(e3, str): return e3
+      t3 = unify(e3, NumberType())
+      if isinstance(t3, str): return t3
+  kw["env"] = kw["env"].copy()
+  kw["env"][var.value] = NumberType()
+  return infer(body, **kw)
+
+def infer_iter_for_stmt(names, expr, body, **kw):
+  iter = infer(expr, **kw)
+  if isinstance(iter, str): return iter
+  if isinstance(iter, TupleType): iter = iter.values[0]
+  if isinstance(iter, UnknownType):
+    body = infer(body, **kw)
+    if isinstance(body, str): return body
+    body.dependencies += iter.dependencies
+    return body
+  if not isinstance(iter, FunctionType):
+    return f"???:{kw['loc']}: Attempting to iterate with '{iter}', expected an iterator function"
+  kw["env"] = kw["env"]
+  for n, e in zip(names.children, iter.returns.values):
+    kw["env"][n.value] = e
+  return infer(body, **kw)
+
+def infer_of_for_stmt(name, expr, body, **kw):
+  expr = infer(expr, **kw)
+  if isinstance(expr, str): return expr
+  if isinstance(expr, TupleType): expr = expr.values[0]
+  if isinstance(expr, UnknownType):
+    body = infer(body, **kw)
+    if isinstance(body, str): return body
+    body.dependencies += expr.dependencies
+    return body
+  if not isinstance(expr, DictType):
+    return f"???:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
+  kw["env"] = kw["env"].copy()
+  kw["env"][name.value] = expr
+  return infer(body, **kw)
+
+def infer_it_for_stmt(expr, body, **kw):
+  expr = infer(expr, **kw)
+  if isinstance(expr, str): return expr
+  if isinstance(expr, TupleType): expr = expr.values[0]
+  if isinstance(expr, UnknownType):
+    body = infer(body, **kw)
+    if isinstance(body, str): return body
+    body.dependencies += expr.dependencies
+    return body
+  if not isinstance(expr, DictType):
+    return f"???:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
+  kw["env"] = kw["env"].copy()
+  kw["env"]["it"] = expr.value
+  kw["env"]["idx"] = NumberType()
+  return infer(body, **kw)
+
+
 
 def infer_return_stmt(exprs, **kw) -> 'AnyType | str':
   if not exprs:

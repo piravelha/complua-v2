@@ -1,3 +1,4 @@
+from os import O_TMPFILE
 import subprocess
 from lark import Token, Tree
 from parser import parser
@@ -34,6 +35,19 @@ def compile_NUMBER(value, **kw) -> str:
 def compile_STRING(value, **kw) -> str:
   return value
 
+def compile_template_literal(start, *contents, **kw):
+  if start is None: start = ""
+  s = str(start)
+  vs = []
+  for content in contents:
+    x, r = content.children
+    if r is None: r = ""
+    s += "%s" + str(r)
+    x = compile(x, **kw)
+    vs.append(x)
+  vs = "".join(f", {v}" for v in vs)
+  return f"string.format(\"{s}\"{vs})"
+
 def compile_BOOLEAN(value, **kw) -> str:
   return value
 
@@ -51,9 +65,28 @@ def compile_table(*fields, **kw) -> str:
     code += f"{key} = {value},\n"
   return code + "}"
 
+def compile_dict(*fields, **kw):
+  code = "{\n"
+  i = 0
+  for field in fields:
+    if len(field.children) == 2:
+      key, value = field.children
+    else:
+      value = field.children[0]
+      i += 1
+      key = f"{i}"
+    value = compile(value, **kw)
+    code += f"[{key}] = {value},\n"
+  return code + "}"
+
 def compile_prop_expr(prefix, prop, **kw) -> str:
   prefix = compile(prefix, **kw)
   return f"{prefix}.{prop.value}"
+
+def compile_index_expr(prefix, index, **kw):
+  prefix = compile(prefix, **kw)
+  index = compile(index, **kw)
+  return f"{prefix}[{index}]"
 
 def compile_unary_expr(op, expr, **kw) -> str:
   expr = compile(expr, **kw)
@@ -67,6 +100,7 @@ def compile_math_expr(left, op, right, **kw) -> str:
 compile_pow_expr = compile_math_expr
 compile_mul_expr = compile_math_expr
 compile_add_expr = compile_math_expr
+compile_rel_expr = compile_math_expr
 compile_eq_expr = compile_math_expr
 compile_and_expr = compile_math_expr
 compile_or_expr = compile_math_expr
@@ -124,6 +158,11 @@ def compile_var_decl(names, exprs, **kw) -> str:
   exprs = ", ".join(compile(e, **kw) for e in exprs.children)
   return f"local {names} = {exprs};"
 
+def compile_assign_stmt(prefix, expr, **kw):
+  prefix = compile(prefix, **kw)
+  expr = compile(expr, **kw)
+  return f"{prefix} = {expr};"
+
 def compile_if_stmt(cond, body, elseif_bs, else_b, **kw):
   cond = compile(cond, **kw)
   body = compile(body, **kw)
@@ -138,6 +177,39 @@ def compile_if_stmt(cond, body, elseif_bs, else_b, **kw):
     else_body = compile(else_body, **kw)
     s += f"else\n{else_body}\n"
   return s + "end"
+
+def compile_range_for_stmt(var, e1, e2, e3, body, **kw):
+  if not e2:
+    stop = compile(e1, **kw)
+    start, step = "1", "1"
+  elif not e3:
+    start = compile(e1, **kw)
+    stop = compile(e2, **kw)
+    step = "1"
+  else:
+    start = compile(e1, **kw)
+    stop = compile(e2, **kw)
+    step = compile(e3, **kw)
+  body = compile(body, **kw)
+  return f"for {var} = {start}, {stop}, {step} do\n{body}\nend"
+
+def compile_iter_for_stmt(names, iter, body, **kw):
+  names = ", ".join(n.value for n in names.children)
+  iter = compile(iter, **kw)
+  body = compile(body, **kw)
+  return f"for {names} in {iter} do\n{body}\nend"
+
+def compile_of_for_stmt(name, expr, body, **kw):
+  expr = compile(expr, **kw)
+  body = compile(body, **kw)
+  return f"for _, {name} in pairs({expr}) do\n{body}\nend"
+
+def compile_it_for_stmt(expr, body, **kw):
+  expr = compile(expr, **kw)
+  body = compile(body, **kw)
+  return f"for idx, it in pairs({expr}) do\n{body}\nend"
+
+
 
 def compile_return_stmt(exprs, **kw) -> str:
   if not exprs:
