@@ -1,8 +1,16 @@
 
-function add(x)
-  return function(y)
-    return x + y
-  end
+#checkcall sums_10(x, y, z)
+  assert(x + y + z == 10)
+end
+function sums_10(x, y, z)
+  -- ...
 end
 
-#eval print(add(1)(2))
+sums_10(1, 6, 3) -- ok
+sums_10(2, 5, 3) -- ok
+sums_10(3, 4, 4) -- fails
+
+-- my lua compiler allows you
+-- to verify these scenarios!
+
+

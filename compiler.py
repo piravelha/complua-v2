@@ -1,4 +1,3 @@
-from os import O_TMPFILE
 import subprocess
 from lark import Token, Tree
 from parser import parser
@@ -115,6 +114,9 @@ def compile_func_expr(func, **kw) -> str:
 
 def compile_func_call(prefix, args, **kw) -> str:
   prefix_type = infer(prefix, env=kw["type_env"], checkcall=kw["checkcall"], value_env=kw["env"])
+  if isinstance(prefix_type, TupleType):
+    prefix_type = prefix_type.values[0]
+  prefix = compile(prefix, **kw)
   if isinstance(prefix_type, FunctionType):
     if prefix_type.inline:
       params, body = prefix_type.tree.children
@@ -131,7 +133,6 @@ def compile_func_call(prefix, args, **kw) -> str:
           ]),
           args,
         ]), **kw)
-  prefix = compile(prefix, **kw)
   args = ", ".join(compile(a, **kw) for a in args.children)
   return f"{prefix}({args})"
 

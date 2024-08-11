@@ -78,7 +78,7 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       if isinstance(x, str): return x
       new.append(x)
     
-    return FunctionType(TupleType(new), t1.tree, None, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc)
+    return FunctionType(TupleType(new), t1.tree, t1.checkcall, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc)
   
   return f"???:{t1.loc}: Types don't unify: '{t1}' and '{t2}'"
 

@@ -1,6 +1,7 @@
 function add(x)
-  return function(y)
-  return x + y;
-end;
+  function inner(y)
+    return x + y;
+  end
+  return inner;
 end
 unpack({})
