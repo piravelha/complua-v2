@@ -34,7 +34,6 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
   if isinstance(t1, PrimitiveType) and isinstance(t2, PrimitiveType):
     if t1.name == t2.name:
       return t1
-    assert False
     return f"{kw['file']}:{t1.loc}: Primitive types don't unify: '{t1}' and '{t2}'"
   
   if isinstance(t1, TableType) and isinstance(t2, TableType):
@@ -58,7 +57,7 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
       if isinstance(x, str): return x
       new[k2] = x
       
-    return TableType(new, t1.name, t1.dependencies + t2.dependencies, t1.is_parameter, t1.loc)
+    return TableType(new, t1.name, t1.dependencies + t2.dependencies, t1.is_parameter, t1.loc, t1.mutable or t2.mutable)
   
   if isinstance(t1, DictType) and isinstance(t2, DictType):
 
@@ -66,7 +65,7 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
     if isinstance(k, str): return k
     v = unify(t1.value, t2.value)
     if isinstance(v, str): return v
-    return DictType(k, v, t1.dependencies, t1.is_parameter, t1.loc)
+    return DictType(k, v, t1.dependencies, t1.is_parameter, t1.loc, t1.mutable or t2.mutable)
 
   if isinstance(t1, FunctionType) and isinstance(t2, FunctionType):
 
@@ -75,13 +74,15 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
     if len(ps1.children) != len(ps2.children):
       return f"???:{t1.loc}: Function types '{t1}' and '{t2}' have different parameter counts"
     
+    mutates = []
     new = []
     for a, b in zip(t1.returns.values, t2.returns.values):
       x = unify(a, b, **kw)
       if isinstance(x, str): return x
       new.append(x)
+      mutates.extend(get_mutates(x))
     
-    return FunctionType(TupleType(new), t1.tree, t1.checkcall, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc)
+    return FunctionType(TupleType(new, [], mutates), t1.tree, t1.checkcalls, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc, t1.mutable or t2.mutable)
   
   return f"???:{t1.loc}: Types don't unify: '{t1}' and '{t2}'"
 
@@ -140,4 +141,28 @@ def get_tree_dependencies(tree) -> list[str]:
     if tree.type == "NAME":
       return [tree.value]
     return []
-  return [d for child in tree.children for d in get_tree_dependencies(child)]
+  return [d for child in tree.children for d in get_tree_dependencies(child if child else Tree("empty", []))]
+
+def get_prefix(prefix):
+  if isinstance(prefix, Token):
+    return prefix
+  return get_prefix(prefix.children[0])
+
+def get_mutates(type: AnyType, **kw) -> list[str]:
+  if isinstance(type, FunctionType):
+    return type.mutates
+  if isinstance(type, PrimitiveType): return []
+  if isinstance(type, UnknownType): return []
+  if isinstance(type, TableType):
+    mutates = []
+    for k, v in type.fields.items():
+      mutates.extend(get_mutates(v))
+    return mutates
+  if isinstance(type, DictType):
+    return get_mutates(type.key) + get_mutates(type.value)
+  if isinstance(type, TupleType):
+    mutates = []
+    for t in type.values:
+      mutates.extend(get_mutates(t))
+    return mutates
+

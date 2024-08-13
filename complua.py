@@ -8,6 +8,7 @@ from type_models import *
 from util import get_loc, get_dependencies, replace_name
 from infer import *
 from formatter import format
+from builtin_types import types
 
 PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -29,7 +30,7 @@ def infer_from_compile(tree, **kw):
     return tree
   if isinstance(tree, Tree) and not globals().get("infer_"+tree.data):
     return tree
-  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"])
+  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"], defer=kw["defer"], depens=kw["depens"])
   if isinstance(result, str):
     print(result)
     exit(1)
@@ -131,11 +132,28 @@ def copy_kw(kw):
   kw["env"] = kw["env"].copy()
   return kw
 
+def compile_default_param(param, expr, **kw):
+  return param.value + "#" + compile(expr, **kw)
+
+def compile_mutable_param(param, **kw):
+  return compile(param, **kw)
+
 def compile_func_body(params, body, **kw) -> str:
   kw = copy_kw(kw)
   body = compile(body, **kw)
-  params = ", ".join(compile(p, **kw) for p in params.children)
-  return f"({params})\n{body}\nend"
+  new_params = []
+  defaults = []
+  for param in params.children:
+    param = compile(param, **kw)
+    if "#" in param:
+      p, d = param.split("#", 1)
+      new_params.append(p)
+      defaults.append(f"if {p} == nil then\n{p} = {d}\nend")
+    else:
+      new_params.append(param)
+  params = ", ".join(new_params)
+  defaults = "\n".join(defaults)
+  return f"({params})\n{defaults}\n{body}\nend"
 
 def compile_func_expr(func, **kw) -> str:
   return "function" + compile(func, **kw)
@@ -162,6 +180,20 @@ def compile_func_call(prefix, args, **kw) -> str:
 
 def compile_call_stmt(call, **kw) -> str:
   return compile(call, **kw) + ";"
+
+def compile_method_expr(prefix, name, args, **kw):
+  return compile_func_call(
+    Tree("prop_expr", [
+      prefix,
+      name,
+    ]),
+    Tree("args", [prefix] + args.children),
+    **kw,
+  )
+
+def compile_method_stmt(call, **kw) -> str:
+  return compile(call, **kw) + ";"
+
 
 def compile_func_decl(name, func, **kw) -> str:
   kw["env"][name.value] = kw["this"]
@@ -248,7 +280,8 @@ def compile_return_stmt(exprs, **kw) -> str:
     exprs = ""
   else:
     exprs = ", ".join(compile(e, **kw) for e in exprs.children)
-  return f"return {exprs};"
+  defers = "\n".join([compile(defer, **kw) for defer in kw["defer"]])
+  return f"{defers}\nreturn {exprs};"
 
 def compile_eval(expr, **kw) -> str:
   old_expr = expr
@@ -302,11 +335,12 @@ def compile_load(expr, **kw) -> str:
 def compile_inline(func_decl, **kw) -> str:
   return ""
 
-def compile_checkcall(name, body, **kw) -> str:
+def compile_defer(stmt, **kw):
+  kw["defer"].append(stmt)
   return ""
 
-def compile_return_checkcall(check, func, **kw):
-  return compile(func, **kw)
+def compile_checkcall(name, body, **kw) -> str:
+  return ""
 
 def compile_repr(expr, **kw):
   return compile_eval(Tree("func_call", [
@@ -326,9 +360,12 @@ def compile_using(*names, **kw):
 
 def compile_chunk(*stmts, **kw) -> str:
   *stmts, last = stmts
+  kw["defer"] = kw["defer"].copy()
   stmts = "\n".join(compile(s, **kw) for s in stmts)
+  defers = "\n".join([compile(defer, **kw) for defer in kw["defer"]])
+  kw["defer"] = []
   last = last and compile(last, **kw) or ""
-  return stmts + "\n" + last
+  return stmts + "\n" + defers + last
 
 def compile(tree, **kw) -> str:
   kw["this"] = tree
@@ -347,15 +384,16 @@ def main() -> None:
 
   tree = parser.parse(code)
   env = {}
-  type_env = {}
+  type_env = types.copy()
   checkcall = {}
   using = []
   depens = []
-  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file)
+  defer = []
+  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file, defer=defer)
   if isinstance(type, str):
     print(type)
     exit(1)
-  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={}, depens=depens, file=file)
+  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={}, depens=depens, file=file, defer=defer)
   with open("out.lua", "w") as f:
     f.write(format(result))
 

@@ -54,9 +54,6 @@ local file = io.open(".complua/.eval.temp", "w")
 
 
 
-local __eval = (function()
-
-return string.format("x := %s", unpack({[1] = "\"5\""}));
-end)();
+local __eval = { print(tbl) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

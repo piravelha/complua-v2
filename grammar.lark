@@ -3,12 +3,12 @@
 ?any_rule: stmt | expr
 
 eval.3: "#eval" expr
-checkcall.3: "#checkcall" RAW_NAME func_body
-return_checkcall.3: "#checkcall" func_body return_stmt
+checkcall.3: "#check" RAW_NAME NAME
 inline.3: "#inline" func_decl
 using.3: "#using" NAME ("." NAME)*
 load.3: "#load" expr
 repr.3: "#repr" expr
+defer.3: "#defer" stmt
 
 chunk: stmt* [last_stmt]
 
@@ -29,6 +29,7 @@ chunk: stmt* [last_stmt]
      | inline
      | using
      | load
+     | defer
 
 assign_stmt: assignable "=" expr
 ?assignable: NAME
@@ -55,7 +56,6 @@ else_branch: "else" chunk
 
 ?last_stmt: return_stmt
           | break_stmt
-          | return_checkcall
 
 return_stmt.2: "return" [exprs]
 break_stmt: "break"
@@ -64,7 +64,11 @@ func_decl: "function" RAW_NAME func_body
 func_expr: "function" func_body
 
 func_body: params chunk "end"
-params: "(" (RAW_NAME ("," RAW_NAME)*)? ")"
+params: "(" (param ("," param)*)? ")"
+?param: base_param
+      | "!" base_param -> mutable_param
+?base_param: RAW_NAME
+           | RAW_NAME "=" expr -> default_param
 
 const_decl: NAME "::" expr
 var_decl: names ":=" exprs
@@ -75,7 +79,7 @@ exprs: expr ("," expr)* ","?
 dict.2: "{" (dict_field ("," dict_field)* ","?)? "}"
 dict_field: "[" expr "]" "=" expr | expr
 
-table: "{" (table_field ("," table_field)* ","?)? "}"
+table.1: "{" (table_field ("," table_field)* ","?)? "}"
 ?table_field: RAW_NAME "=" expr
             | checkcall
 
