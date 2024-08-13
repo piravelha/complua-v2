@@ -2,7 +2,20 @@ _G["#COMPLUA"] = _G["#COMPLUA"] or {}
 
 _G["#COMPLUA"].serialize = function(o)
   if type(o) == "string" then
-    return '"' .. o .. '"'
+    local s = ""
+    local i = 1
+    while i <= #o do
+      c = o:sub(i, i)
+      if c == "\"" then
+        s = s .. "\\" .. c
+      elseif c == "\\" then
+        s = s .. "\\\\"
+      else
+        s = s .. c
+      end
+      i = i + 1
+    end
+    return "\"" .. s .. "\""
   end
   if type(o) == "table" then
     local s = "{"

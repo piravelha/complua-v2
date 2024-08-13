@@ -1,10 +1,14 @@
 ?start: chunk
 
-eval: "#eval" expr
-checkcall: "#checkcall" RAW_NAME func_body
-return_checkcall: "#checkcall" func_body return_stmt
-inline: "#inline" func_decl
-using: "#using" NAME ("." NAME)*
+?any_rule: stmt | expr
+
+eval.3: "#eval" expr
+checkcall.3: "#checkcall" RAW_NAME func_body
+return_checkcall.3: "#checkcall" func_body return_stmt
+inline.3: "#inline" func_decl
+using.3: "#using" NAME ("." NAME)*
+load.3: "#load" expr
+repr.3: "#repr" expr
 
 chunk: stmt* [last_stmt]
 
@@ -24,6 +28,7 @@ chunk: stmt* [last_stmt]
      | eval
      | inline
      | using
+     | load
 
 assign_stmt: assignable "=" expr
 ?assignable: NAME
@@ -79,16 +84,19 @@ index_expr: prefix_expr "[" expr "]"
 method_expr: prefix_expr ":" RAW_NAME args
 
 func_call: prefix_expr args
+open_func_call: prefix_expr open_args
 
 args: "(" (expr ("," expr)* ","?)? ")"
-    | STRING
-    | template_literal
-    | table
+  
+open_args: STRING
+         | template_literal
+         | table
 
 ?expr: or_expr
      | func_expr
      | do_expr
      | eval
+     | load
 
 ?or_expr: or_expr OR_OP and_expr
         | and_expr
@@ -122,6 +130,8 @@ args: "(" (expr ("," expr)* ","?)? ")"
      | NUMBER
      | table
      | dict
+     | open_func_call
+     | repr
 
 ?prefix_expr: NAME
             | func_call

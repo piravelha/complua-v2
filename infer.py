@@ -565,6 +565,9 @@ def infer_return_stmt(exprs, **kw) -> 'AnyType | str':
 def infer_eval(expr, **kw) -> 'AnyType | str':
   return infer(expr, **kw)
 
+def infer_load(expr, **kw):
+  return UnknownType([], False, kw["loc"])
+
 def infer_checkcall(name, func, **kw) -> 'AnyType | str':
   kw["checkcall"][name.value] = func
   return NilType([], kw["loc"])
@@ -586,6 +589,9 @@ def infer_return_checkcall(check, ret, **kw):
 
 def infer_using(*names, **kw):
   return NilType()
+
+def infer_repr(expr, **kw):
+  return StringType([], kw["loc"])
 
 def from_infer(kw):
   return {

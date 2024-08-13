@@ -1,24 +1,9 @@
 
-framerate :: 60
-
-function map(tbl, fn)
-  new := {}
-  for tbl do
-    new[idx] = fn(it)
-  end
-  return new
+#inline function define_x(value)
+  return `x := {#repr "5"}`
 end
 
-function main()
-  array :: {1, 2, 3}
-  new :: map(array, function(x)
-    return x * framerate
-  end)
-  for new do
-    print(it)
-  end
-end
-
-#eval main()
+#load define_x(5)
+print(x)
 
 

@@ -34,7 +34,8 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
   if isinstance(t1, PrimitiveType) and isinstance(t2, PrimitiveType):
     if t1.name == t2.name:
       return t1
-    return f"???:{t1.loc}: Primitive types don't unify: '{t1}' and '{t2}'"
+    assert False
+    return f"{kw['file']}:{t1.loc}: Primitive types don't unify: '{t1}' and '{t2}'"
   
   if isinstance(t1, TableType) and isinstance(t2, TableType):
     if (t1.name or t2.name) and t1.name != t2.name:

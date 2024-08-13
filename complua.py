@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 from lark import Token, Tree
-from parser import parser
+from parser import parser, any_parser
 from type_models import *
 from util import get_loc, get_dependencies, replace_name
 from infer import *
@@ -251,13 +251,7 @@ def compile_return_stmt(exprs, **kw) -> str:
   return f"return {exprs};"
 
 def compile_eval(expr, **kw) -> str:
-  #try:
   old_expr = expr
-  #except KeyError as e: # attempting to evaluate
-  #  print(
-  #    f"???:{kw['loc']}: Could not evaluate '#eval' directive, " \
-  #    + f"variable '{e.args[0]}' is not statically known.")
-  #  exit(1)
   path = "./.complua/.eval"
   expr = compile(expr, **kw)
   code = f"\n\nlocal __eval = {{ {expr} }};\n"
@@ -276,6 +270,35 @@ def compile_eval(expr, **kw) -> str:
     generated = f.read()
   return f"unpack({generated})"
 
+def compile_load(expr, **kw) -> str:
+  old_expr = expr
+  path = "./.complua/.eval"
+  expr = compile(expr, **kw)
+  code = f"\n\nlocal __eval = {expr};\n"
+  code += f"file:write(_G['#COMPLUA'].serialize(__eval));\n"
+  code += f"file:close();\n"
+  with open(PATH+"/lib.lua") as f:
+    lib = f.read()
+  deps = get_dependencies(old_expr, **kw)
+  with open(path, "w") as f:
+    f.write(lib + "\n".join(deps) + code)
+  out = subprocess.run(["luajit", path], stderr=subprocess.PIPE)
+  if out.stderr:
+    print(out.stderr.decode())
+    exit(1)
+  with open(path + ".temp", "r") as f:
+    generated = f.read()
+  if generated[0] != "\"" or generated[-1] != "\"":
+    print(f"{kw['file']}:{kw['loc']} Attempting to call '#load' directive with a non-string argument")
+    exit(1)
+  s = eval(generated)
+  tree = any_parser.parse(s)
+  type = infer_from_compile(tree, **kw)
+  if isinstance(type, str):
+    print(type)
+    exit(1)
+  return compile(tree, **kw)
+
 def compile_inline(func_decl, **kw) -> str:
   return ""
 
@@ -284,6 +307,18 @@ def compile_checkcall(name, body, **kw) -> str:
 
 def compile_return_checkcall(check, func, **kw):
   return compile(func, **kw)
+
+def compile_repr(expr, **kw):
+  return compile_eval(Tree("func_call", [
+    Tree("prop_expr", [
+      Tree("index_expr", [
+        Token("NAME", "_G"),
+        Token("STRING", "\"#COMPLUA\""),
+      ]),
+      Token("RAW_NAME", "serialize"),
+    ]),
+    Tree("args", [expr])
+  ]), **kw)
 
 def compile_using(*names, **kw):
   kw["using"].append(names)
