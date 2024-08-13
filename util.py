@@ -1,5 +1,4 @@
 from lark import Tree, Token
-from lark.visitors import _Decoratable
 from type_models import *
 
 def get_loc(tree) -> str:
@@ -74,21 +73,19 @@ def unify(t1: AnyType, t2: AnyType, **kw) -> 'Type | str':
     if len(ps1.children) != len(ps2.children):
       return f"???:{t1.loc}: Function types '{t1}' and '{t2}' have different parameter counts"
     
-    mutates = []
     new = []
     for a, b in zip(t1.returns.values, t2.returns.values):
       x = unify(a, b, **kw)
       if isinstance(x, str): return x
       new.append(x)
-      mutates.extend(get_mutates(x))
     
-    return FunctionType(TupleType(new, [], mutates), t1.tree, t1.checkcalls, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.loc, t1.mutable or t2.mutable)
+    return FunctionType(TupleType(new, []), t1.tree, t1.checkcalls + t2.checkcalls, t1.dependencies + t2.dependencies, False, t1.is_parameter, t1.mutable or t2.mutable, kw["env"], t1.loc, t1.name or t2.name)
   
   return f"???:{t1.loc}: Types don't unify: '{t1}' and '{t2}'"
 
 def filter_dependencies(type: AnyType, **kw) -> list[str]:
   deps = type.dependencies
-  new: list[str] = []
+  new = []
   for dep in deps:
     if isinstance(dep, Tree):
       new.append(dep)
@@ -131,7 +128,7 @@ def replace_name(tree, old: str | None, new: Tree | Token):
     for c in tree.children:
       children.append(replace_name(c, old, new))
       if isinstance(c, Tree) and c.data == "var_decl":
-        if old in [n.value for n in c.children[0].children]:
+        if old in [str(n) for n in c.children[0].children]:
           old = None
     return Tree(tree.data, children)
   return tree
@@ -147,22 +144,3 @@ def get_prefix(prefix):
   if isinstance(prefix, Token):
     return prefix
   return get_prefix(prefix.children[0])
-
-def get_mutates(type: AnyType, **kw) -> list[str]:
-  if isinstance(type, FunctionType):
-    return type.mutates
-  if isinstance(type, PrimitiveType): return []
-  if isinstance(type, UnknownType): return []
-  if isinstance(type, TableType):
-    mutates = []
-    for k, v in type.fields.items():
-      mutates.extend(get_mutates(v))
-    return mutates
-  if isinstance(type, DictType):
-    return get_mutates(type.key) + get_mutates(type.value)
-  if isinstance(type, TupleType):
-    mutates = []
-    for t in type.values:
-      mutates.extend(get_mutates(t))
-    return mutates
-

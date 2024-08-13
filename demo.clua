@@ -1,15 +1,23 @@
-
-function check_person(name, age)
-  assert(type(name) == "string")
-  assert(type(age) == "number")
+function check_person(name, age, hobbies)
 end
 
-struct Person(name, age)
-  name = name,
-  age = age,
+function Person(name, age, hobbies)
+  return {
+    name = name,
+    age = age,
+    greet = function(other)
+      print(`Hello {other.name}!, i am {name}, nice to meet you.`)
+    end,
+  }
 end
 
 #check Person check_person
 
-p :: Person("Ian", 15)
+immutable_hobbies :: { "programming" }
+mutable_hobbies := { "gaming" }
+
+p1 :: Person("Ian", 15, immutable_hobbies)
+p2 :: Person("Miguel", 5, mutable_hobbies)
+
+p1.greet(p2)
 

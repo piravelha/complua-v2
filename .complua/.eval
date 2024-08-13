@@ -52,13 +52,15 @@ end
 
 local file = io.open(".complua/.eval.temp", "w")
 
-function check_person(name, age)
+function check_person(name, age, hobbies)
 
-assert(type(name) == "string");
-assert(type(age) == "number");
+
 
 end
+local immutable_hobbies = {
+"programming",
+};
 
-local __eval = { check_person("Ian", 15) };
+local __eval = { check_person("Ian", 15, immutable_hobbies) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

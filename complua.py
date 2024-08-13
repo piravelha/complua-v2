@@ -168,7 +168,6 @@ def compile_do_expr(chunk, **kw) -> str:
 
 def compile_func_call(prefix, args, **kw) -> str:
   prefix_type = infer_from_compile(prefix, **kw)
-  #prefix_type = infer(prefix, env=kw["type_env"], checkcall=kw["checkcall"], value_env=kw["env"], using=kw["using"])
   if isinstance(prefix_type, TupleType):
     prefix_type = prefix_type.values[0]
   prefix = compile(prefix, **kw)
@@ -206,9 +205,22 @@ def compile_func_decl(name, func, **kw) -> str:
   if kw["toplevel"]: local = ""
   return f"{local}function {name}{func}"
 
+def compile_params(*params, **kw):
+  new_params = []
+  defaults = []
+  for param in params:
+    param = compile(param, **kw)
+    if "#" in param:
+      p, d = param.split("#", 1)
+      new_params.append(p)
+      defaults.append(f"if {p} == nil then\n{p} = {d}\nend")
+    else:
+      new_params.append(param)
+  return ", ".join(new_params)
+
 def compile_struct_decl(name, params, body, **kw):
   kw["env"][name.value] = kw["this"]
-  params = ", ".join(str(p) for p in params.children)
+  params = compile(params, **kw)
   body = compile(Tree("table", body.children), **kw)
   local = "local "
   if kw["toplevel"]: local = ""
@@ -224,11 +236,17 @@ def compile_var_decl(names, exprs, **kw) -> str:
   exprs = ", ".join(compile(e, **kw) for e in exprs.children)
   return f"local {names} = {exprs};"
 
-def compile_const_decl(name, expr, **kw):
-  kw["env"][name.value] = Tree("const_decl", [name, expr])
-  kw["value_env"] = expr
-  expr = compile(expr, **kw)
-  return f"local {name} = {expr};"
+def compile_const_decl(names, exprs, **kw):
+  new_exprs = []
+  for name, expr in zip(names.children, exprs.children):
+    if name.value in kw["env"]:
+      del kw["env"][name.value]
+    kw["env"][name.value] = Tree("const_decl", [Tree("names", [name]), Tree("exprs", [expr])])
+    kw["value_env"][name.value] = expr
+    new_exprs.append(expr)
+  new_exprs = ", ".join(compile(expr, **kw) for expr in new_exprs)
+  new_names = ", ".join(str(name) for name in names.children)
+  return f"local {new_names} = {new_exprs};"
 
 def compile_assign_stmt(prefix, expr, **kw):
   prefix = compile(prefix, **kw)

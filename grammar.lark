@@ -3,7 +3,6 @@
 ?any_rule: stmt | expr
 
 eval.3: "#eval" expr
-checkcall.3: "#check" RAW_NAME NAME
 inline.3: "#inline" func_decl
 using.3: "#using" NAME ("." NAME)*
 load.3: "#load" expr
@@ -24,7 +23,6 @@ chunk: stmt* [last_stmt]
      | func_decl
      | assign_stmt
      | struct_decl
-     | checkcall
      | eval
      | inline
      | using
@@ -70,7 +68,7 @@ params: "(" (param ("," param)*)? ")"
 ?base_param: RAW_NAME
            | RAW_NAME "=" expr -> default_param
 
-const_decl: NAME "::" expr
+const_decl: names "::" exprs
 var_decl: names ":=" exprs
 
 names: RAW_NAME ("," RAW_NAME)* ","?
@@ -81,7 +79,6 @@ dict_field: "[" expr "]" "=" expr | expr
 
 table.1: "{" (table_field ("," table_field)* ","?)? "}"
 ?table_field: RAW_NAME "=" expr
-            | checkcall
 
 prop_expr: prefix_expr "." RAW_NAME
 index_expr: prefix_expr "[" expr "]"

@@ -1,0 +1,25 @@
+{
+  "name": "complua",
+  "displayName": "CompLua",
+  "description": "Syntax highlighting for complua",
+  "version": "0.0.4",
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "complua",
+      "aliases": ["CompLua", "complua"],
+      "extensions": [".clua"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "complua",
+      "scopeName": "source.clua",
+      "path": "./syntaxes/complua.tmLanguage.json"
+    }]
+  }
+}

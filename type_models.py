@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from re import S
 from typing import Any, TypeAlias
-from lark import Tree
+from lark import Tree, Token
 
 Type: TypeAlias = 'PrimitiveType | UnknownType | TableType | DictType | FunctionType'
 AnyType: TypeAlias = 'Type | TupleType'
@@ -88,7 +87,9 @@ class FunctionType:
       inline: bool = False,
       is_parameter: bool = False,
       mutable: bool = False,
-      loc = "0:0"):
+      closure: dict = {},
+      loc = "0:0",
+      name: str | None = None):
     if not isinstance(returns, TupleType):
       returns = TupleType([returns])
     self.returns = returns
@@ -97,15 +98,23 @@ class FunctionType:
     self.dependencies = dependencies
     self.inline = inline
     self.is_parameter = is_parameter
-    self.loc = loc
     self.mutable = mutable
+    self.closure = closure
+    self.loc = loc
+    self.name = name
   def __repr__(self):
+    if self.name: return self.name
     params, _ = self.tree.children
-    params = ", ".join([f"{p}" for p in params.children])
+    def param_repr(p):
+      if isinstance(p, Token): return str(p)
+      if p.data == "default_param": return f"{p.children[0]} = {p.children[1]}"
+      if p.data == "mutable_param": return f"!{p.children[0]}"
+      assert False
+    params = ", ".join([param_repr(p) for p in params.children])
     returns = ", ".join(f"{r}" for r in self.returns.values)
     return f"({params}) -> {returns}"
   def copy(self):
-    return FunctionType(self.returns, self.tree, self.checkcalls, self.dependencies, self.inline, self.is_parameter, self.loc, self.mutable)
+    return FunctionType(self.returns, self.tree, self.checkcalls, self.dependencies, self.inline, self.is_parameter, self.mutable, self.closure, self.loc, self.name)
   
 @dataclass
 class TupleType:
