@@ -1,11 +1,24 @@
 
-#inline function inverse(x)
-  #checkcall(y)
-    assert(x + y == 0)
+framerate :: 60
+
+function map(tbl, fn)
+  new := {}
+  for tbl do
+    new[idx] = fn(it)
   end
-  return function(y) end
+  return new
 end
 
-inverse(5)(-5)
+function main()
+  array :: {1, 2, 3}
+  new :: map(array, function(x)
+    return x * framerate
+  end)
+  for new do
+    print(it)
+  end
+end
+
+#eval main()
 
 

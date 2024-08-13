@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+
+python ~/python/actual-complua-v2/complua-v2/complua.py $1

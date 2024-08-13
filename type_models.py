@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from re import S
 from typing import TypeAlias
 from lark import Tree
 
@@ -38,14 +39,16 @@ class UnknownType:
 @dataclass
 class TableType:
   fields: dict[str, Type]
+  name: str | None
   dependencies: list[Tree]
   is_parameter: bool
   loc: int
   def __repr__(self):
+    if self.name: return self.name
     fields = [f"{k}: {v}" for k, v in self.fields.items()]
     return "{" + ", ".join(fields) + "}"
   def copy(self):
-    return TableType(self.fields, self.dependencies, self.is_parameter, self.loc)
+    return TableType(self.fields, self.name, self.dependencies, self.is_parameter, self.loc)
   
 @dataclass
 class DictType:

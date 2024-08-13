@@ -1,10 +1,15 @@
+#!/usr/bin/python
+import os
 import subprocess
+import sys
 from lark import Token, Tree
 from parser import parser
 from type_models import *
 from util import get_loc, get_dependencies, replace_name
 from infer import *
 from formatter import format
+
+PATH = os.path.dirname(os.path.abspath(__file__))
 
 def get_using(path, name, current=None, acc="", **kw):
   if current is None:
@@ -24,8 +29,10 @@ def infer_from_compile(tree, **kw):
     return tree
   if isinstance(tree, Tree) and not globals().get("infer_"+tree.data):
     return tree
-  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"])
-  if isinstance(result, str): raise TypeError(result)
+  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"])
+  if isinstance(result, str):
+    print(result)
+    exit(1)
   return result
 
 def compile_NAME(value, **kw) -> str:
@@ -68,23 +75,30 @@ def compile_paren(expr, **kw) -> str:
 def compile_table(*fields, **kw) -> str:
   code = "{\n"
   for field in fields:
+    if field.data == "checkcall": continue
     key, value = field.children
     value = compile(value, **kw)
     code += f"{key} = {value},\n"
   return code + "}"
 
+def compile_named_table(name, table, **kw):
+  s = compile(table, **kw)[1:]
+  s = f"{{\n[\"#NAME\"] = \"{name}\",\n" + s
+  return s
+
 def compile_dict(*fields, **kw):
   code = "{\n"
-  i = 0
   for field in fields:
     if len(field.children) == 2:
       key, value = field.children
     else:
       value = field.children[0]
-      i += 1
-      key = f"{i}"
+      key = None
     value = compile(value, **kw)
-    code += f"[{key}] = {value},\n"
+    if key:
+      code += f"[{key}] = {value},\n"
+    else:
+      code += f"{value},\n"
   return code + "}"
 
 def compile_prop_expr(prefix, prop, **kw) -> str:
@@ -113,7 +127,12 @@ compile_eq_expr = compile_math_expr
 compile_and_expr = compile_math_expr
 compile_or_expr = compile_math_expr
 
+def copy_kw(kw):
+  kw["env"] = kw["env"].copy()
+  return kw
+
 def compile_func_body(params, body, **kw) -> str:
+  kw = copy_kw(kw)
   body = compile(body, **kw)
   params = ", ".join(compile(p, **kw) for p in params.children)
   return f"({params})\n{body}\nend"
@@ -121,8 +140,13 @@ def compile_func_body(params, body, **kw) -> str:
 def compile_func_expr(func, **kw) -> str:
   return "function" + compile(func, **kw)
 
+def compile_do_expr(chunk, **kw) -> str:
+  chunk = compile(chunk, **kw)
+  return f"(function()\n{chunk}\nend)()"
+
 def compile_func_call(prefix, args, **kw) -> str:
-  prefix_type = infer(prefix, env=kw["type_env"], checkcall=kw["checkcall"], value_env=kw["env"])
+  prefix_type = infer_from_compile(prefix, **kw)
+  #prefix_type = infer(prefix, env=kw["type_env"], checkcall=kw["checkcall"], value_env=kw["env"], using=kw["using"])
   if isinstance(prefix_type, TupleType):
     prefix_type = prefix_type.values[0]
   prefix = compile(prefix, **kw)
@@ -141,23 +165,30 @@ def compile_call_stmt(call, **kw) -> str:
 
 def compile_func_decl(name, func, **kw) -> str:
   kw["env"][name.value] = kw["this"]
-  kw["value_env"][name.value] = func
-  func = compile(func, **kw)
-  return f"function {name}{func}"
-
-def compile_local_func_decl(name, func, **kw) -> str:
-  kw["env"][name.value] = kw["this"]
   func = compile(func, **kw)
   return f"local function {name}{func}"
 
+def compile_struct_decl(name, params, body, **kw):
+  kw["env"][name.value] = kw["this"]
+  params = ", ".join(str(p) for p in params.children)
+  body = compile(Tree("table", body.children), **kw)
+  return f"function {name}({params})\nreturn {body}\nend"
+
 def compile_var_decl(names, exprs, **kw) -> str:
   for name, expr in zip(names.children, exprs.children):
-    kw["env"][name.value] = Tree("var_decl", [Tree("names", [name]), Tree("exprs", [expr])])
+    if name.value in kw["env"]:
+      del kw["env"][name.value]
     kw["value_env"][name.value] = expr
 
   names = ", ".join(compile(n, **kw) for n in names.children)
   exprs = ", ".join(compile(e, **kw) for e in exprs.children)
   return f"local {names} = {exprs};"
+
+def compile_const_decl(name, expr, **kw):
+  kw["env"][name.value] = Tree("const_decl", [name, expr])
+  kw["value_env"] = expr
+  expr = compile(expr, **kw)
+  return f"local {name} = {expr};"
 
 def compile_assign_stmt(prefix, expr, **kw):
   prefix = compile(prefix, **kw)
@@ -232,7 +263,7 @@ def compile_eval(expr, **kw) -> str:
   code = f"\n\nlocal __eval = {{ {expr} }};\n"
   code += f"file:write(_G['#COMPLUA'].serialize(__eval));\n"
   code += f"file:close();\n"
-  with open("lib.lua") as f:
+  with open(PATH+"/lib.lua") as f:
     lib = f.read()
   deps = get_dependencies(old_expr, **kw)
   with open(path, "w") as f:
@@ -274,7 +305,9 @@ def compile(tree, **kw) -> str:
 def main() -> None:
   subprocess.run(["mkdir", ".complua"], capture_output=True)
 
-  with open("demo.clua") as f:
+  file = sys.argv[1]
+
+  with open(file) as f:
     code = f.read()
 
   tree = parser.parse(code)
@@ -282,9 +315,12 @@ def main() -> None:
   type_env = {}
   checkcall = {}
   using = []
-  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using)
-  if isinstance(type, str): raise TypeError(type)
-  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={})
+  depens = []
+  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file)
+  if isinstance(type, str):
+    print(type)
+    exit(1)
+  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={}, depens=depens, file=file)
   with open("out.lua", "w") as f:
     f.write(format(result))
 

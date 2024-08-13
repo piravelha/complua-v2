@@ -9,6 +9,7 @@ using: "#using" NAME ("." NAME)*
 chunk: stmt* [last_stmt]
 
 ?stmt: var_decl
+     | const_decl
      | func_call -> call_stmt
      | method_expr -> method_stmt
      | if_stmt
@@ -17,8 +18,8 @@ chunk: stmt* [last_stmt]
      | it_for_stmt
      | of_for_stmt
      | func_decl
-     | local_func_decl
      | assign_stmt
+     | struct_decl
      | checkcall
      | eval
      | inline
@@ -29,11 +30,16 @@ assign_stmt: assignable "=" expr
            | prop_expr
            | index_expr
 
+struct_decl: "struct" NAME params struct_body "end"
+struct_body: (table_field ("," table_field)* ","?)?
+
 it_for_stmt: "for" expr "do" chunk "end"
 
 iter_for_stmt: "for" names "in" expr "do" chunk "end"
 
 of_for_stmt: "for" NAME "of" expr "do" chunk "end"
+
+do_expr: "do" chunk "end"
 
 range_for_stmt: "for" NAME "=" expr ["," expr ["," expr]] "do" chunk "end"
 
@@ -49,23 +55,24 @@ else_branch: "else" chunk
 return_stmt.2: "return" [exprs]
 break_stmt: "break"
 
-local_func_decl: "local" "function" RAW_NAME func_body
 func_decl: "function" RAW_NAME func_body
 func_expr: "function" func_body
 
 func_body: params chunk "end"
 params: "(" (RAW_NAME ("," RAW_NAME)*)? ")"
 
-var_decl: "local" names "=" exprs
+const_decl: NAME "::" expr
+var_decl: names ":=" exprs
 
 names: RAW_NAME ("," RAW_NAME)* ","?
 exprs: expr ("," expr)* ","?
 
-dict: "{" (dict_field ("," dict_field)* ","?)? "}"
+dict.2: "{" (dict_field ("," dict_field)* ","?)? "}"
 dict_field: "[" expr "]" "=" expr | expr
 
 table: "{" (table_field ("," table_field)* ","?)? "}"
-table_field: RAW_NAME "=" expr
+?table_field: RAW_NAME "=" expr
+            | checkcall
 
 prop_expr: prefix_expr "." RAW_NAME
 index_expr: prefix_expr "[" expr "]"
@@ -80,6 +87,7 @@ args: "(" (expr ("," expr)* ","?)? ")"
 
 ?expr: or_expr
      | func_expr
+     | do_expr
      | eval
 
 ?or_expr: or_expr OR_OP and_expr
@@ -141,7 +149,7 @@ NIL: "nil"
 BOOLEAN: "true" | "false"
 STRING: /"([^"\\]|\\.)*"/
 NUMBER: /-?\d+(\.\d+)?/
-NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
+NAME: /(?!return\b)[a-zA-Z_][a-zA-Z_0-9]*/
 RAW_NAME: /[a-zA-Z_][a-zA-Z_0-9]*/
 
 COMMENT: /--.*/

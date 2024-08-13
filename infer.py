@@ -3,23 +3,34 @@ from typing import Dict, Tuple
 from lark import Token
 from dataclasses import is_dataclass
 from type_models import *
-from util import get_loc, replace_name, unify, filter_dependencies
+from util import get_dependencies, get_loc, replace_name, unify, filter_dependencies, get_tree_dependencies
 import re
+
+def copy_kw(kw):
+  kw["env"] = kw["env"].copy()
+  kw["value_env"] = kw["value_env"].copy()
+  return kw
 
 def get_path(path, **kw):
   def run(path, env):
+    if path in kw["value_env"]:
+      return f"{kw['file']}:{kw['loc']}: Attempting to mutate a constant value", path
     if isinstance(path, Token):
       return env[path], env
     if path.data == "prop_expr":
       prefix, prop = path.children
       prefix, _ = run(prefix, env)
       if isinstance(prefix, str): return prefix, _
+      if isinstance(prefix, TupleType):
+        prefix = prefix.values[0]
       assert isinstance(prefix, TableType)
       return run(prop, prefix.fields)[0], prefix
     if path.data == "index_expr":
       prefix, _ = path.children
       prefix, _ = run(prefix, env)
       if isinstance(prefix, str): return prefix, _
+      if isinstance(prefix, TupleType):
+        prefix = prefix.values[0]
       assert isinstance(prefix, DictType)
       return prefix.value, prefix
     assert False
@@ -65,14 +76,28 @@ def infer_table(*fields, **kw) -> 'AnyType | str':
   new_fields = {}
   deps = []
   for field in fields:
+    if field.data == "checkcall":
+      check = infer(field, **kw)
+      if isinstance(check, str): return check
+      continue
     key, value = field.children
     value = infer(value, **kw)
     if isinstance(value, TupleType):
       value = value.values[0]
+    if isinstance(value, FunctionType):
+      if kw["checkcall"].get(key.value):
+        value.checkcall = kw["checkcall"][key.value]
     if isinstance(value, str): return value
     new_fields[key.value] = value
     deps += value.dependencies
-  return TableType(new_fields, deps, False, kw["loc"])
+  return TableType(new_fields, None, deps, False, kw["loc"])
+
+def infer_named_table(name, table, **kw):
+  table = infer(table, **kw)
+  if isinstance(table, str): return table
+  assert isinstance(table, TableType)
+  table.name = name.value
+  return table
 
 def infer_dict(*fields, **kw):
   key_type = None
@@ -101,6 +126,9 @@ def infer_dict(*fields, **kw):
     v = unify(value_type, value)
     if isinstance(v, str): return v
     value_type = v
+  if not key_type:
+    key_type = UnknownType([], False, kw["loc"])
+    value_type = UnknownType([], False, kw["loc"])
   assert key_type
   assert value_type
   return DictType(key_type, value_type, key_type.dependencies + value_type.dependencies, False, kw["loc"])
@@ -113,11 +141,11 @@ def infer_prop_expr(prefix, prop, **kw) -> 'AnyType | str':
   if isinstance(prefix_type, UnknownType):
     return prefix_type
   if not isinstance(prefix_type, TableType):
-    return f"???:{kw['loc']}: Attempting to access property '{prop}' on a non-table value '{prefix_type}'"
+    return f"{kw['file']}:{kw['loc']}: Attempting to access property '{prop}' on a non-table value '{prefix_type}'"
   for key, value in prefix_type.fields.items():
     if key == prop.value:
       return value
-  return f"???:{kw['loc']}: Property '{prop}' does not exist on table '{prefix_type}'"
+  return f"{kw['file']}:{kw['loc']}: Property '{prop}' does not exist on table '{prefix_type}'"
 
 def infer_index_expr(prefix, index, **kw):
   prefix_type = infer(prefix, **kw)
@@ -132,10 +160,12 @@ def infer_index_expr(prefix, index, **kw):
     prefix_type.dependencies += index_type.dependencies
     return prefix_type
   if not isinstance(prefix_type, DictType):
-    return f"???:{kw['loc']}: Attempting to index a non-dictionary type: '{prefix_type}'"
+    return f"{kw['file']}:{kw['loc']}: Attempting to index a non-dictionary type: '{prefix_type}'"
   u = unify(prefix_type.key, index_type)
   if isinstance(u, str): return u
-  return prefix_type.value
+  val = prefix_type.value.copy()
+  val.dependencies += index_type.dependencies + prefix_type.dependencies
+  return val
 
 
 def infer_unary_expr(op, expr, **kw) -> 'AnyType | str':
@@ -228,7 +258,9 @@ infer_or_expr = infer_log_expr
 
 
 def infer_func_body(params, body, **kw) -> 'AnyType | str':
-  kw["env"] = kw["env"].copy()
+  kw = copy_kw(kw)
+  for t in kw["env"].values():
+    t.is_parameter = False
   for param in params.children:
     kw["env"][param.value] = UnknownType([], True, kw["loc"])
   body_type = infer(body, **kw)
@@ -237,7 +269,20 @@ def infer_func_body(params, body, **kw) -> 'AnyType | str':
   return FunctionType(body_type, kw["this"], None, body_type.dependencies, False, False, kw["loc"])
 
 def infer_func_expr(func, **kw) -> 'AnyType | str':
-  return infer(func, **kw)
+  res = infer(func, **kw)
+  if isinstance(res, str): return res
+  return res
+
+def infer_do_expr(chunk, **kw) -> 'AnyType | str':
+  return infer(Tree("func_call", [
+    Tree("func_expr", [
+      Tree("func_body", [
+        Tree("params", []),
+        chunk
+      ]),
+    ]),
+    Tree("args", []),
+  ]), **kw)
 
 def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
   prefix_type = infer(prefix, **kw)
@@ -263,7 +308,7 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
     prefix_type.dependencies += prefix_depens
     return prefix_type
   if not isinstance(prefix_type, FunctionType):
-    return f"???:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"  
+    return f"{kw['file']}:{kw['loc']}: Attempting to call a non-function value of type '{prefix_type}'"  
   params, body = prefix_type.tree.children
   if prefix_type.inline:
     for p, a in zip(params.children, args.children):
@@ -271,19 +316,19 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
       body = replace_name(body, p.value, a)
     return infer(body, **kw)
   if len(new_args) < len(params.children):
-    return f"???:{kw['loc']}: Not enough arguments provided to function '{prefix_type}', " \
+    return f"{kw['file']}:{kw['loc']}: Not enough arguments provided to function '{prefix_type}', " \
       + f"expected {len(params.children)}, but got {len(new_args)}"
   if len(new_args) > len(params.children):
-    return f"???:{kw['loc']}: Too many arguments provided to function '{prefix_type}', " \
+    return f"{kw['file']}:{kw['loc']}: Too many arguments provided to function '{prefix_type}', " \
       + f"expected {len(params.children)}, but got {len(new_args)}"
-  kw["env"] = kw["env"].copy()
+  kw = copy_kw(kw)
   if prefix_type.checkcall:
-    from compiler import compile_eval
-    body = prefix_type.checkcall
+    from complua import compile_eval
+    check = prefix_type.checkcall
     compile_eval(
       Tree("func_call", [
         Tree("paren", [
-          Tree("func_expr", [body])
+          Tree("func_expr", [check])
         ]),
         args,
       ]), env=kw["value_env"], type_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"])
@@ -307,6 +352,7 @@ def infer_call_stmt(call, **kw) -> 'AnyType | str':
   return infer(call, **kw)
 
 def infer_func_decl(name, func, **kw) -> 'AnyType | str':
+  kw["value_env"][name.value] = kw["this"]
   kw["env"][name.value] = UnknownType([], False, kw["loc"])
   func = infer(func, **kw)
   if isinstance(func, str): return func
@@ -320,6 +366,27 @@ def infer_func_decl(name, func, **kw) -> 'AnyType | str':
 
 infer_local_func_decl = infer_func_decl
 
+def infer_struct_decl(name, params, body, **kw):
+  kw["value_env"][name.value] = kw["this"]
+  tree = Tree("func_decl", [
+    name,
+    Tree("func_body", [
+      params,
+      Tree("chunk", [
+        Tree("return_stmt", [
+          Tree("exprs", [
+            Tree("named_table", [
+              name,
+              Tree("table", body.children)
+            ])
+          ]),
+        ]),
+      ]),
+    ]),
+  ])
+  return infer(tree, **kw)
+
+
 def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
   new_exprs: list[Type] = []
   for expr in exprs.children:
@@ -332,14 +399,25 @@ def infer_var_decl(names, exprs, **kw) -> 'AnyType | str':
     else:
       new_exprs.append(expr)
   if len(new_exprs) < len(names.children):
-    return f"???:{kw['loc']}: Not enough expressions provided on variable declaration, " \
+    return f"{kw['file']}:{kw['loc']}: Not enough expressions provided on variable declaration, " \
       + f"expected '{len(names.children)}', but got '{len(new_exprs)}'"
   if len(new_exprs) > len(names.children):
-    return f"???:{kw['loc']}: Too many expressions provided on variable declaration, " \
+    return f"{kw['file']}:{kw['loc']}: Too many expressions provided on variable declaration, " \
       + f"expected '{len(names.children)}', but got '{len(new_exprs)}'"
+  depens = []
   for name, expr in zip(names.children, new_exprs):
+    #if kw["value_env"].get(name.value):
+    #  del kw["value_env"][name.value]
     kw["env"][name.value] = expr
-  return NilType([], kw["loc"])
+    depens.extend(expr.dependencies)
+  return NilType(depens, kw["loc"])
+
+def infer_const_decl(name, expr, **kw):
+  expr = infer(expr, **kw)
+  if isinstance(expr, str): return expr
+  kw["value_env"][name.value] = kw["this"]
+  kw["env"][name.value] = expr
+  return NilType(expr.dependencies, kw["loc"]) 
 
 def infer_assign_stmt(prefix, expr, **kw):
   expr = infer(expr, **kw)
@@ -417,7 +495,7 @@ def infer_range_for_stmt(var, e1, e2, e3, body, **kw):
       if isinstance(e3, str): return e3
       t3 = unify(e3, NumberType())
       if isinstance(t3, str): return t3
-  kw["env"] = kw["env"].copy()
+  kw = copy_kw(kw)
   kw["env"][var.value] = NumberType()
   return infer(body, **kw)
 
@@ -431,7 +509,7 @@ def infer_iter_for_stmt(names, expr, body, **kw):
     body.dependencies += iter.dependencies
     return body
   if not isinstance(iter, FunctionType):
-    return f"???:{kw['loc']}: Attempting to iterate with '{iter}', expected an iterator function"
+    return f"{kw['file']}:{kw['loc']}: Attempting to iterate with '{iter}', expected an iterator function"
   kw["env"] = kw["env"]
   for n, e in zip(names.children, iter.returns.values):
     kw["env"][n.value] = e
@@ -447,9 +525,9 @@ def infer_of_for_stmt(name, expr, body, **kw):
     body.dependencies += expr.dependencies
     return body
   if not isinstance(expr, DictType):
-    return f"???:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
-  kw["env"] = kw["env"].copy()
-  kw["env"][name.value] = expr
+    return f"{kw['file']}:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
+  kw = copy_kw(kw)
+  kw["env"][name.value] = expr.value
   return infer(body, **kw)
 
 def infer_it_for_stmt(expr, body, **kw):
@@ -462,8 +540,8 @@ def infer_it_for_stmt(expr, body, **kw):
     body.dependencies += expr.dependencies
     return body
   if not isinstance(expr, DictType):
-    return f"???:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
-  kw["env"] = kw["env"].copy()
+    return f"{kw['file']}:{kw['loc']}: Attempting to iterate over a non-dictionary type: '{expr}'"
+  kw = copy_kw(kw)
   kw["env"]["it"] = expr.value
   kw["env"]["idx"] = NumberType()
   return infer(body, **kw)
@@ -481,6 +559,7 @@ def infer_return_stmt(exprs, **kw) -> 'AnyType | str':
       new_exprs.values.extend(expr.values)
     else:
       new_exprs.values.append(expr)
+    new_exprs.dependencies.extend(expr.dependencies)
   return new_exprs
 
 def infer_eval(expr, **kw) -> 'AnyType | str':
@@ -501,12 +580,21 @@ def infer_return_checkcall(check, ret, **kw):
   assert isinstance(ret, TupleType)
   func = ret.values[0]
   if not isinstance(func, FunctionType):
-    return f"???:{kw['loc']}: Anonnymous '#checkcall' directive must be followed by a function, but got '{func}' instead"
+    return f"{kw['file']}:{kw['loc']}: Anonnymous '#checkcall' directive must be followed by a function, but got '{func}' instead"
   func.checkcall = check
   return TupleType([func] + ret.values[1:])
 
 def infer_using(*names, **kw):
   return NilType()
+
+def from_infer(kw):
+  return {
+    "env": kw["value_env"],
+    "type_env": kw["env"],
+    "checkcall": kw["checkcall"],
+    "using": kw["using"],
+    "file": kw["file"],
+  }
 
 def infer_chunk(*stmts, **kw) -> 'AnyType | str':
   *stmts, last = stmts
@@ -522,7 +610,7 @@ def infer_chunk(*stmts, **kw) -> 'AnyType | str':
         else: returns[i] = unify(returns[i], ret)
         if isinstance(returns[i], str): return returns[i]
     depens.extend(stmt.dependencies)
-
+  
   last = last and infer(last, **kw) or TupleType([])
   if isinstance(last, str): return last
   assert isinstance(last, TupleType)
@@ -548,7 +636,11 @@ def infer(tree, **kw) -> 'AnyType | str':
   kw["this"] = tree
   kw["loc"] = get_loc(tree)
   if isinstance(tree, Token):
-    return globals()["infer_" + tree.type](tree.value, **kw)
+    type = globals()["infer_" + tree.type](tree.value, **kw)
+    if isinstance(type, str): return type
+    return type
   if isinstance(tree, Tree):
-    return globals()["infer_" + tree.data](*tree.children, **kw)
+    type = globals()["infer_" + tree.data](*tree.children, **kw)
+    if isinstance(type, str): return type
+    return type
   return UnknownType([], False, 0)

@@ -30,5 +30,12 @@ _G["#COMPLUA"].serialize = function(o)
   return tostring(o)
 end
 
+local function nameof(obj)
+  if type(obj) ~= "table" then
+    return nil
+  end
+  return obj["#NAME"]
+end
+
 local file = io.open(".complua/.eval.temp", "w")
 

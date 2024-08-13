@@ -30,13 +30,42 @@ _G["#COMPLUA"].serialize = function(o)
   return tostring(o)
 end
 
+local function nameof(obj)
+  if type(obj) ~= "table" then
+    return nil
+  end
+  return obj["#NAME"]
+end
+
 local file = io.open(".complua/.eval.temp", "w")
 
+local framerate = 60;
+local function map(tbl, fn)
+local new = {
+};
+for idx, it in pairs(tbl) do
+new[idx] = fn(it);
 
+end
+return new;
+end
+local function main()
+local array = {
+1,
+2,
+3,
+};
+local new = map(array, function(x)
 
-local __eval = { (function(y)
-assert(y + - 1 == 0);
+return x * framerate;
+end);
+for idx, it in pairs(new) do
+print(it);
 
-end)(1) };
+end
+
+end
+
+local __eval = { main() };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();
