@@ -1,8 +1,11 @@
-local function mutate(x)
-x[1] = 1;
-print("YIPPE");
+function check_person(name, age)
+  assert(type(name) == "string");
+  assert(type(age) == "number");
 end
-local tbl = {
-};
-mutate(tbl);
-unpack({})
+function Person(name, age)
+  return {
+    name = name,
+    age = age,
+  };
+end
+local p = Person("Ian", 15);

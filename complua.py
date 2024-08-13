@@ -30,7 +30,7 @@ def infer_from_compile(tree, **kw):
     return tree
   if isinstance(tree, Tree) and not globals().get("infer_"+tree.data):
     return tree
-  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"], defer=kw["defer"], depens=kw["depens"])
+  result = infer(tree, env=kw["type_env"], value_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"], defer=kw["defer"], depens=kw["depens"], toplevel=True)
   if isinstance(result, str):
     print(result)
     exit(1)
@@ -100,6 +100,8 @@ def compile_dict(*fields, **kw):
       code += f"[{key}] = {value},\n"
     else:
       code += f"{value},\n"
+  if len(fields) == 0:
+    return "{}"
   return code + "}"
 
 def compile_prop_expr(prefix, prop, **kw) -> str:
@@ -130,6 +132,7 @@ compile_or_expr = compile_math_expr
 
 def copy_kw(kw):
   kw["env"] = kw["env"].copy()
+  kw["defer"] = kw["defer"].copy()
   return kw
 
 def compile_default_param(param, expr, **kw):
@@ -140,6 +143,7 @@ def compile_mutable_param(param, **kw):
 
 def compile_func_body(params, body, **kw) -> str:
   kw = copy_kw(kw)
+  kw["toplevel"] = False
   body = compile(body, **kw)
   new_params = []
   defaults = []
@@ -198,13 +202,17 @@ def compile_method_stmt(call, **kw) -> str:
 def compile_func_decl(name, func, **kw) -> str:
   kw["env"][name.value] = kw["this"]
   func = compile(func, **kw)
-  return f"local function {name}{func}"
+  local = "local "
+  if kw["toplevel"]: local = ""
+  return f"{local}function {name}{func}"
 
 def compile_struct_decl(name, params, body, **kw):
   kw["env"][name.value] = kw["this"]
   params = ", ".join(str(p) for p in params.children)
   body = compile(Tree("table", body.children), **kw)
-  return f"function {name}({params})\nreturn {body}\nend"
+  local = "local "
+  if kw["toplevel"]: local = ""
+  return f"{local}function {name}({params})\nreturn {body};\nend"
 
 def compile_var_decl(names, exprs, **kw) -> str:
   for name, expr in zip(names.children, exprs.children):
@@ -360,7 +368,7 @@ def compile_using(*names, **kw):
 
 def compile_chunk(*stmts, **kw) -> str:
   *stmts, last = stmts
-  kw["defer"] = kw["defer"].copy()
+  kw = copy_kw(kw)
   stmts = "\n".join(compile(s, **kw) for s in stmts)
   defers = "\n".join([compile(defer, **kw) for defer in kw["defer"]])
   kw["defer"] = []
@@ -389,11 +397,18 @@ def main() -> None:
   using = []
   depens = []
   defer = []
-  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file, defer=defer)
+  for stmt in tree.children:
+    if not isinstance(stmt, Tree): continue
+    if stmt.data == "func_decl":
+      type = infer(stmt, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file, defer=defer, toplevel=True)
+      if isinstance(type, str):
+        print(type)
+        exit(1)
+  type = infer(tree, env=type_env, value_env=env, checkcall=checkcall, using=using, depens=depens, file=file, defer=defer, toplevel=True)
   if isinstance(type, str):
     print(type)
     exit(1)
-  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={}, depens=depens, file=file, defer=defer)
+  result = compile(tree, env=env, type_env=type_env, checkcall=checkcall, using=using, value_env={}, depens=depens, file=file, defer=defer, toplevel=True)
   with open("out.lua", "w") as f:
     f.write(format(result))
 

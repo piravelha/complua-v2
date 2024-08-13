@@ -52,8 +52,13 @@ end
 
 local file = io.open(".complua/.eval.temp", "w")
 
+function check_person(name, age)
 
+assert(type(name) == "string");
+assert(type(age) == "number");
 
-local __eval = { print(tbl) };
+end
+
+local __eval = { check_person("Ian", 15) };
 file:write(_G['#COMPLUA'].serialize(__eval));
 file:close();

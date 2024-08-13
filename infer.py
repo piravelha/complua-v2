@@ -370,7 +370,9 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
         Tree("func_call", [
           check,
           args,
-        ]), env=kw["value_env"], type_env=kw["env"], checkcall=kw["checkcall"], using=kw["using"], file=kw["file"], defer=kw["defer"])
+        ]),
+        **from_infer(kw),
+      )
   for i, (param, arg) in enumerate(zip(params.children, new_args)):
     mut = False
     if isinstance(param, Tree):
@@ -380,8 +382,6 @@ def infer_func_call(prefix, args, **kw) -> 'AnyType | str':
     if isinstance(param, Tree):
       if param.data == "default_param":
         param = param.children[0]
-    if mut and not arg.mutable:
-      return f"{kw['file']}:{get_loc(args.children[i])}: Argument #{i+1} is not allowed, parameter of the function is mutable, but argument is immutable"
     if mut:
       arg.mutable = mut
     assert isinstance(param, Token)
@@ -653,13 +653,9 @@ def infer_repr(expr, **kw):
   return StringType([], kw["loc"])
 
 def from_infer(kw):
-  return {
+  return kw | {
     "env": kw["value_env"],
     "type_env": kw["env"],
-    "checkcall": kw["checkcall"],
-    "using": kw["using"],
-    "file": kw["file"],
-    "depens": kw["depens"],
   }
 
 def infer_chunk(*stmts, **kw) -> 'AnyType | str':
